@@ -27,7 +27,7 @@
     "openai-php/client": "^0.19.2",
     "google-gemini-php/client": "^2.7",
     "guzzlehttp/guzzle": "^7.0",
-    "inertiajs/inertia-laravel": "^2.0"
+    "inertiajs/inertia-laravel": "^2.0 || ^3.0"
   },
   "suggest": {
     "bspdx/keystone": "Suggested for host-app authorization around admin AI routes and related access control wiring."

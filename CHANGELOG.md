@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 — 2026-06-06
+
+This patch release updates the package's Inertia Laravel dependency line to keep host-application installs aligned with the current compatibility targets.
+
+### Bug Fixes
+- Updated the `inertiajs/inertia-laravel` dependency constraints and lockfile so host applications resolve the intended package version consistently.
+
 ## 0.1.1 — 2026-06-06
 
 This patch release improves package compatibility and installation behavior for host Laravel applications, including verified Laravel 13 support.
