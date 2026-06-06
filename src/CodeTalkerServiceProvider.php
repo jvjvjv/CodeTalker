@@ -65,7 +65,7 @@ class CodeTalkerServiceProvider extends ServiceProvider
      *   CodeTalkerServiceProvider::registerToolParameterResolver(
      *       fn (AiConversation $conversation): array => [
      *           'resumeDataService' => app(ResumeDataServiceContract::class),
-     *           'targetedResumeService' => app(TargetedResumeService::class),
+    *           'myDomainService' => app(MyDomainService::class),
      *       ]
      *   );
      */

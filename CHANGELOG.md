@@ -1,6 +1,17 @@
 # Changelog
 
-## 0.2.1 — 2026-06-06
+## 0.2.2 - 2026-06-07
+
+This patch release removes a stray package dependency and limits the default system prompt seed migration to only include the three generic prompts owned by the package. 
+
+Host applications that previously relied on the default system prompt seed to create `TargetedResumeService`-specific prompts will need to create those prompts manually or through a custom migration after upgrading.
+
+### Bug Fixes
+
+- Removed the package's stray `TargetedResumeService` dependency from the default system prompt seed migration.
+- Limited the default system prompt seed migration to the three package-owned generic prompts and moved their IDs into a dedicated package support class.
+
+## 0.2.1 — 2026-06-07
 
 This patch release fixes package migrations so host applications are no longer required to use UUID user keys.
 
