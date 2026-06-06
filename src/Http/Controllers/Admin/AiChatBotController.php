@@ -43,9 +43,7 @@ class AiChatBotController extends Controller
                 'access_path' => $bot->access_path,
                 'public_url' => $bot->publicPath(),
                 'description' => $bot->description,
-                'allowed_roles' => $bot->allowed_roles ?? [],
                 'is_active' => $bot->is_active,
-                'is_public' => $bot->is_public,
                 'ai_system' => $bot->aiSystem,
                 'require_visitor_identity' => $bot->require_visitor_identity,
                 'conversations_count' => $bot->conversations_count,
@@ -73,7 +71,6 @@ class AiChatBotController extends Controller
     {
         return Inertia::render('ai/bots/Create', [
             'systems' => $this->systems(),
-            'roles' => $this->roles(),
         ]);
     }
 
@@ -98,7 +95,6 @@ class AiChatBotController extends Controller
         return Inertia::render('ai/bots/Edit', [
             'bot' => $aiChatBot,
             'systems' => $this->systems(),
-            'roles' => $this->roles(),
         ]);
     }
 
@@ -188,21 +184,4 @@ class AiChatBotController extends Controller
             ->all();
     }
 
-    /**
-     * @return array<int, string>
-     */
-    /**
-     * Returns available role names.
-     * Resolves from Spatie laravel-permission if installed, otherwise returns an empty array.
-     *
-     * @return array<int, string>
-     */
-    private function roles(): array
-    {
-        if (class_exists(\Spatie\Permission\Models\Role::class)) {
-            return \Spatie\Permission\Models\Role::query()->orderBy('name')->pluck('name')->all();
-        }
-
-        return [];
-    }
 }

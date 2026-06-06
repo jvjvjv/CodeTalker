@@ -40,7 +40,6 @@ class ChatBotController extends Controller
             ->active()
             ->orderBy('name')
             ->get()
-            ->filter(fn (AiChatBot $bot) => $bot->is_public || $this->canAccessPrivateBot($bot, $user))
             ->values();
 
         $conversationsByBotId = collect();
@@ -80,16 +79,12 @@ class ChatBotController extends Controller
         ]);
     }
 
-    public function statuses(Request $request): JsonResponse
-    {
-        $user = $request->user();
-
+    public function statuses(Request $request): JsonResponse {
         $bots = AiChatBot::query()
             ->active()
             ->with('aiSystem')
             ->orderBy('name')
             ->get()
-            ->filter(fn (AiChatBot $bot) => $bot->is_public || $this->canAccessPrivateBot($bot, $user))
             ->values();
 
         $statusesBySystemId = [];
@@ -141,7 +136,6 @@ class ChatBotController extends Controller
             'bot' => [
                 'name' => $aiChatBot->name,
                 'description' => $aiChatBot->description,
-                'is_public' => $aiChatBot->is_public,
                 'require_visitor_identity' => $aiChatBot->require_visitor_identity,
                 'total_cost_usd' => (float) (AiConversation::query()
                     ->where('ai_chat_bot_id', $aiChatBot->id)
@@ -354,7 +348,6 @@ class ChatBotController extends Controller
             'bot' => [
                 'name' => $bot->name,
                 'description' => $bot->description,
-                'is_public' => $bot->is_public,
                 'require_visitor_identity' => $bot->require_visitor_identity,
                 'total_cost_usd' => (float) (AiConversation::query()
                     ->where('ai_chat_bot_id', $bot->id)
@@ -380,14 +373,6 @@ class ChatBotController extends Controller
     {
         abort_unless($aiChatBot->is_active, 404);
         abort_unless($aiChatBot->access_path === $this->requestAccessPath($request), 404);
-
-        if ($request->user()) {
-            abort_unless($aiChatBot->is_public || $aiChatBot->allowsRole($request->user()), 403);
-
-            return;
-        }
-
-        abort_unless($aiChatBot->is_public, 403);
     }
 
     private function storedConversation(Request $request, AiChatBot $aiChatBot): ?AiConversation
@@ -546,14 +531,5 @@ class ChatBotController extends Controller
         $prefix = $aiChatBot->usesRootAccessPath() ? 'chat-bots.root.' : 'chat-bots.chat.';
 
         return route($prefix . $action, $aiChatBot);
-    }
-
-    private function canAccessPrivateBot(AiChatBot $aiChatBot, ?User $user): bool
-    {
-        if ($user === null) {
-            return false;
-        }
-
-        return $aiChatBot->allowsRole($user);
     }
 }

@@ -18,9 +18,7 @@ return new class extends Migration
             $table->string('slug')->unique();
             $table->text('description')->nullable();
             $table->text('prompt_template');
-            $table->json('allowed_roles')->nullable();
             $table->boolean('is_active')->default(true);
-            $table->boolean('is_public')->default(false);
             $table->boolean('require_visitor_identity')->default(false);
             $table->timestamps();
             $table->softDeletes();

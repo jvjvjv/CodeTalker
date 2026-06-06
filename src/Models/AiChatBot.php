@@ -27,9 +27,7 @@ class AiChatBot extends Model
         'access_path',
         'description',
         'prompt_template',
-        'allowed_roles',
         'is_active',
-        'is_public',
         'require_visitor_identity',
         'tools_enabled',
     ];
@@ -37,11 +35,9 @@ class AiChatBot extends Model
     protected function casts(): array
     {
         return [
-            'allowed_roles' => 'array',
             'context_length' => 'integer',
             'temperature' => 'decimal:2',
             'is_active' => 'boolean',
-            'is_public' => 'boolean',
             'require_visitor_identity' => 'boolean',
             'tools_enabled' => 'boolean',
         ];
@@ -101,29 +97,6 @@ class AiChatBot extends Model
     public function interactionLogs(): HasMany
     {
         return $this->hasMany(AiInteractionLog::class);
-    }
-
-    /**
-     * Check if the given user has one of the bot's allowed roles.
-     * Uses hasAnyRole() if the user model implements it (e.g. Spatie laravel-permission).
-     */
-    public function allowsRole(mixed $user): bool
-    {
-        if ($user === null) {
-            return false;
-        }
-
-        $allowedRoles = $this->allowed_roles ?? [];
-
-        if ($allowedRoles === []) {
-            return true;
-        }
-
-        if (method_exists($user, 'hasAnyRole')) {
-            return $user->hasAnyRole($allowedRoles);
-        }
-
-        return false;
     }
 
     public function featureKey(): string

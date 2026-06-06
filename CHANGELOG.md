@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0 — 2026-06-07
+
+This breaking release removes package-managed chatbot authentication and authorization so the package only manages AI chatbot behavior and the consuming application owns all access rules.
+
+### Breaking Changes
+- Removed package-level chatbot visibility and role concepts. `AiChatBot::is_public`, any previous `allowed_roles` usage, and the package's private-bot authorization hook are no longer supported.
+- The package no longer decides who may access `/chats`, `/chat/{slug}`, `/{slug}`, or `/admin/ai/*`. Host applications must enforce all chatbot and admin access through their own middleware, gates, and policies.
+- Fresh installs no longer create the `ai_chat_bots.is_public` column, and upgraded installs must run the new migration that drops it.
+
+### New Features
+- Simplified the package boundary so chatbot management stays in the package while authentication and authorization live entirely in the consuming application.
+
+### Bug Fixes
+- Removed internal access filtering that mixed package chatbot behavior with host-application authorization decisions.
+
+### Known Issues
+- If you previously relied on package-managed bot visibility, move that logic into your application's `code-talker.middleware` and `code-talker.admin_middleware` configuration before upgrading. Public bot access should now be expressed by leaving chatbot routes open, and restricted bot access should be expressed with your application's own auth middleware, gates, or policies.
+
 ## 0.1.2 — 2026-06-06
 
 This patch release updates the package's Inertia Laravel dependency line to keep host-application installs aligned with the current compatibility targets.

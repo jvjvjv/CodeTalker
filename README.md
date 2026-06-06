@@ -139,15 +139,14 @@ An `AiChatBot` defines a user-facing persona. Create one at `/admin/ai/chat-bots
 | `slug` | URL-safe identifier, must be unique |
 | `access_path` | `chat` → `/chat/{slug}`, `root` → `/{slug}` |
 | `prompt_template` | System prompt with optional placeholders (see below) |
-| `is_public` | Public bots are accessible without authentication |
 | `require_visitor_identity` | Prompt anonymous visitors for name and email |
-| `allowed_roles` | Array of role names (Spatie-compatible); empty = all authenticated users |
 | `tools_enabled` | Whether the bot may invoke registered tools |
 | `temperature` | Overrides `AiSystem` temperature for this bot |
 
-Private-bot role checks call `hasAnyRole()` when it exists on the authenticated
-user model. If your host app does not expose that method, non-public bots with
-`allowed_roles` configured will be denied.
+Chatbot authentication and authorization are not managed by this package. The
+consuming application must decide which users or guests can reach chatbot
+routes by applying its own middleware, gates, or policies around the package
+routes.
 
 ### Prompt template placeholders
 
@@ -166,6 +165,11 @@ The final system prompt is assembled as: `AiSystemPrompt.content` + prompt templ
 ### Auto-registered routes
 
 All routes use the middleware from `code-talker.middleware`.
+
+The package does not treat any bot as inherently public or private. If some
+chatbot routes should require authentication or further authorization, enforce
+that entirely in the consuming application by changing `code-talker.middleware`
+or wrapping the package routes in your own authorization layer.
 
 | Route | Description |
 |-------|-------------|
@@ -282,8 +286,9 @@ app(\Jvjvjv\CodeTalker\Services\AiMemoryService::class)->rebuildMemories('chat-b
 The admin route group is registered under `/admin/ai/*` and uses the middleware
 defined in `code-talker.admin_middleware`, which defaults to `['web', 'auth', 'can:manage-ai-tools']`.
 
-If your host app does not already provide that gate, wire it yourself or use a
-package such as `bspdx/keystone` to supply the surrounding authorization layer.
+If your host app does not already provide that gate, wire it yourself or change
+`code-talker.admin_middleware` to the authorization middleware your application
+already uses.
 
 All admin routes are under `/admin/ai` and require the `can:manage-ai-tools` gate (configurable via `admin_middleware`).
 
@@ -298,7 +303,7 @@ All admin routes are under `/admin/ai` and require the `can:manage-ai-tools` gat
 Define the `manage-ai-tools` gate in your `AppServiceProvider` or `AuthServiceProvider`:
 
 ```php
-Gate::define('manage-ai-tools', fn ($user) => $user->hasRole('admin'));
+Gate::define('manage-ai-tools', fn ($user) => (bool) $user->is_admin);
 ```
 
 ## Scheduled Jobs

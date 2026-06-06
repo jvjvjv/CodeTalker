@@ -2,10 +2,10 @@
 
 namespace Jvjvjv\CodeTalker\Http\Requests\Admin;
 
-use App\Models\AiChatBot;
 use Closure;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Jvjvjv\CodeTalker\Models\AiChatBot;
 
 class UpdateAiChatBotRequest extends FormRequest
 {
@@ -47,10 +47,7 @@ class UpdateAiChatBotRequest extends FormRequest
             'context_length' => ['nullable', 'integer', 'min:1', 'max:200000'],
             'temperature' => ['nullable', 'numeric', 'min:0', 'max:1'],
             'prompt_template' => ['required', 'string'],
-            'allowed_roles' => ['nullable', 'array'],
-            'allowed_roles.*' => ['string', 'max:255'],
             'is_active' => ['boolean'],
-            'is_public' => ['boolean'],
             'require_visitor_identity' => ['boolean'],
             'tools_enabled' => ['boolean'],
         ];
