@@ -12,8 +12,9 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('ai_feature_memories', function (Blueprint $table) {
-            // Add user_id for logged-in users to scope memories per user (uses UUID to match users table)
-            $table->string('user_id', 36)
+            // Add user_id for logged-in users to scope memories per user across
+            // integer, UUID, ULID, and custom string-based host app keys.
+            $table->string('user_id', 191)
                 ->nullable()
                 ->after('source_conversation_id');
 

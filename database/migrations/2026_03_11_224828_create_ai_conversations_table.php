@@ -13,7 +13,10 @@ return new class extends Migration
     {
         Schema::create('ai_conversations', function (Blueprint $table) {
             $table->id();
-            $table->foreignUuid('user_id')->constrained('users');
+            $table->foreignIdFor(config('code-talker.user_model'), 'user_id')
+                ->nullable()
+                ->constrained()
+                ->nullOnDelete();
             $table->foreignId('ai_system_id')->constrained('ai_systems')->cascadeOnDelete();
             $table->string('feature', 100);
             $table->string('title')->nullable();

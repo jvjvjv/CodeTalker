@@ -14,7 +14,10 @@ return new class extends Migration
         Schema::create('ai_interaction_logs', function (Blueprint $table) {
             $table->id();
             $table->foreignId('ai_system_id')->constrained('ai_systems')->cascadeOnDelete();
-            $table->foreignUuid('user_id')->constrained('users');
+            $table->foreignIdFor(config('code-talker.user_model'), 'user_id')
+                ->nullable()
+                ->constrained()
+                ->nullOnDelete();
             $table->string('feature', 100);
             $table->integer('input_tokens')->nullable();
             $table->integer('output_tokens')->nullable();

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1 — 2026-06-06
+
+This patch release fixes package migrations so host applications are no longer required to use UUID user keys.
+
+### Bug Fixes
+- Replaced hardcoded UUID user foreign keys in the package migrations with model-aware user key definitions based on `code-talker.user_model`.
+- Removed follow-up migration steps that attempted to retype `user_id` columns as UUIDs after the initial tables were created.
+- Changed memory user scoping storage to use a generic string identifier so integer, UUID, ULID, and custom string user keys are all supported.
+
 ## 0.2.0 — 2026-06-07
 
 This breaking release removes package-managed chatbot authentication and authorization so the package only manages AI chatbot behavior and the consuming application owns all access rules.
