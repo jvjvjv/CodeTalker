@@ -5,13 +5,16 @@ Multi-provider AI communications package for Laravel — chatbots, streaming, to
 ## Requirements
 
 - PHP ^8.2
-- Laravel ^12.0
+- Laravel ^12.0 || ^13.0
 
 ## Installation
 
 ```bash
 composer require jvjvjv/code-talker
 ```
+
+The package installs the Laravel Inertia adapter as a runtime dependency because
+its public and admin controllers render Inertia responses.
 
 Publish the config and migrations, then run them:
 
@@ -32,6 +35,10 @@ php artisan migrate
 | `admin_middleware` | `['web', 'auth', 'can:manage-ai-tools']` | Middleware applied to admin routes |
 | `reserved_slugs` | `[]` | Additional slugs that cannot be used for root-path chatbots |
 | `schedule` | `true` | Set to `false` to disable the package's automatic scheduled jobs |
+
+### Suggested host-app packages
+
+- `bspdx/keystone` is suggested if you want a ready-made host-app authorization layer for the package's admin AI routes.
 
 ### Provider environment variables
 
@@ -137,6 +144,10 @@ An `AiChatBot` defines a user-facing persona. Create one at `/admin/ai/chat-bots
 | `allowed_roles` | Array of role names (Spatie-compatible); empty = all authenticated users |
 | `tools_enabled` | Whether the bot may invoke registered tools |
 | `temperature` | Overrides `AiSystem` temperature for this bot |
+
+Private-bot role checks call `hasAnyRole()` when it exists on the authenticated
+user model. If your host app does not expose that method, non-public bots with
+`allowed_roles` configured will be denied.
 
 ### Prompt template placeholders
 
@@ -267,6 +278,12 @@ app(\Jvjvjv\CodeTalker\Services\AiMemoryService::class)->rebuildMemories('chat-b
 ```
 
 ## Admin Routes
+
+The admin route group is registered under `/admin/ai/*` and uses the middleware
+defined in `code-talker.admin_middleware`, which defaults to `['web', 'auth', 'can:manage-ai-tools']`.
+
+If your host app does not already provide that gate, wire it yourself or use a
+package such as `bspdx/keystone` to supply the surrounding authorization layer.
 
 All admin routes are under `/admin/ai` and require the `can:manage-ai-tools` gate (configurable via `admin_middleware`).
 

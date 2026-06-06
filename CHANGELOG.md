@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.1 — 2026-06-06
+
+This patch release improves package compatibility and installation behavior for host Laravel applications, including verified Laravel 13 support.
+
+### Bug Fixes
+- Expanded the package constraints to support Laravel 13 and the matching Orchestra Testbench release line for package testing.
+- Declared `inertiajs/inertia-laravel` as a runtime dependency so package controllers rendering Inertia responses install cleanly in host applications.
+- Replaced the package-root test script with a direct PHPUnit invocation and added smoke coverage for package bootstrapping, route registration, and service bindings.
+- Added a GitHub Actions workflow that validates the package and runs the test suite on PHP 8.3 and PHP 8.4.
+- Documented the admin authorization expectations and suggested `bspdx/keystone` as a host-app option for the surrounding access-control layer.
+
+### Known Issues
+- This package is currently locked into using Inertia. This will be removed in a future version and will be a breaking change, so plan host-app integrations accordingly.
+
 ## 0.1.0 — 2026-06-04
 
 This is the initial release, pulled from from the original application code for [Jason Vertucio](https://jasonvertucio.com). The package provides a comprehensive AI chatbot framework with support for multiple LLM providers, agentic tool use, memory management, and conversation tracking. It is designed to be highly extensible and customizable for a wide range of applications.

@@ -22,20 +22,23 @@
   ],
   "require": {
     "php": "^8.2",
-    "laravel/framework": "^12.0",
+    "laravel/framework": "^12.0 || ^13.0",
     "anthropic-ai/sdk": "^0.25.0",
     "openai-php/client": "^0.19.2",
     "google-gemini-php/client": "^2.7",
-    "guzzlehttp/guzzle": "^7.0"
+    "guzzlehttp/guzzle": "^7.0",
+    "inertiajs/inertia-laravel": "^2.0"
+  },
+  "suggest": {
+    "bspdx/keystone": "Suggested for host-app authorization around admin AI routes and related access control wiring."
   },
   "require-dev": {
-    "orchestra/testbench": "^10.0",
+    "orchestra/testbench": "^10.0 || ^11.0",
     "phpunit/phpunit": "^11.0"
   },
   "scripts": {
     "test": [
-      "@php artisan config:clear --ansi",
-      "@php artisan test"
+      "@php vendor/bin/phpunit"
     ],
     "version": [
       "@php -r \"echo 'Current version: '; passthru('git describe --tags --abbrev=0 2>/dev/null || echo No version tags yet');\""
@@ -65,5 +68,10 @@
     }
   },
   "minimum-stability": "stable",
-  "prefer-stable": true
+  "prefer-stable": true,
+  "config": {
+    "allow-plugins": {
+      "php-http/discovery": true
+    }
+  }
 }
