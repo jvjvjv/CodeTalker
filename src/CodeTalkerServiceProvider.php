@@ -107,11 +107,11 @@ class CodeTalkerServiceProvider extends ServiceProvider
         // its own versions of these route files.
         $this->app->booted(function (): void {
             if (! Route::has('chat-bots.root.show')) {
-                $this->loadRoutesFrom(__DIR__ . '/../routes/chatbots.php');
+                $this->loadRoutesFrom($this->routeFilePath('codetalker-chatbots.php'));
             }
 
             if (! Route::has('admin.ai.index')) {
-                $this->loadRoutesFrom(__DIR__ . '/../routes/admin-ai.php');
+                $this->loadRoutesFrom($this->routeFilePath('codetalker-admin.php'));
             }
         });
 
@@ -141,6 +141,19 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 __DIR__ . '/../database/migrations' => database_path('migrations'),
             ], 'code-talker-migrations');
 
+            $this->publishes([
+                __DIR__ . '/../routes/codetalker-chatbots.php' => base_path('routes/codetalker-chatbots.php'),
+                __DIR__ . '/../routes/codetalker-admin.php' => base_path('routes/codetalker-admin.php'),
+            ], 'code-talker-routes');
+
+            $this->publishes([
+                __DIR__ . '/../routes/codetalker-chatbots.php' => base_path('routes/codetalker-chatbots.php'),
+            ], 'code-talker-chatbot-routes');
+
+            $this->publishes([
+                __DIR__ . '/../routes/codetalker-admin.php' => base_path('routes/codetalker-admin.php'),
+            ], 'code-talker-admin-routes');
+
             $this->commands([
                 BackfillAiSystemCapabilitiesCommand::class,
                 BackfillConversationUsageCommand::class,
@@ -158,5 +171,16 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 ->name('ai:daily-conversation-usage-backfill')
                 ->withoutOverlapping();
         }
+    }
+
+    protected function routeFilePath(string $filename): string
+    {
+        $publishedPath = base_path('routes/' . $filename);
+
+        if (is_file($publishedPath)) {
+            return $publishedPath;
+        }
+
+        return __DIR__ . '/../routes/' . $filename;
     }
 }

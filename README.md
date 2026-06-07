@@ -24,6 +24,13 @@ php artisan vendor:publish --tag=code-talker-migrations
 php artisan migrate
 ```
 
+If you want to customize the package route files directly in the host app,
+publish them too:
+
+```bash
+php artisan vendor:publish --tag=code-talker-routes
+```
+
 ## Configuration
 
 `config/code-talker.php` controls package-wide behavior:
@@ -165,6 +172,10 @@ The final system prompt is assembled as: `AiSystemPrompt.content` + prompt templ
 ### Auto-registered routes
 
 All routes use the middleware from `code-talker.middleware`.
+
+If `routes/codetalker-chatbots.php` or `routes/codetalker-admin.php` exists in
+the host app, the package will load those published copies instead of its
+internal defaults.
 
 The package does not treat any bot as inherently public or private. If some
 chatbot routes should require authentication or further authorization, enforce

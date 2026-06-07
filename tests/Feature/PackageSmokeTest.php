@@ -3,6 +3,7 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Inertia\Inertia;
+use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Jvjvjv\CodeTalker\Services\AiClientFactory;
 use Jvjvjv\CodeTalker\Tests\TestCase;
@@ -28,5 +29,28 @@ class PackageSmokeTest extends TestCase
     public function test_inertia_is_available_to_package_controllers(): void
     {
         $this->assertTrue(class_exists(Inertia::class));
+    }
+
+    public function test_it_registers_publishable_route_files(): void
+    {
+        $publishGroups = ServiceProvider::pathsToPublish(
+            provider: \Jvjvjv\CodeTalker\CodeTalkerServiceProvider::class,
+            group: 'code-talker-routes',
+        );
+
+        $this->assertContains(base_path('routes/codetalker-chatbots.php'), $publishGroups);
+        $this->assertContains(base_path('routes/codetalker-admin.php'), $publishGroups);
+
+        $publishedSources = array_flip($publishGroups);
+
+        $this->assertStringEndsWith(
+            '/routes/codetalker-chatbots.php',
+            $publishedSources[base_path('routes/codetalker-chatbots.php')],
+        );
+
+        $this->assertStringEndsWith(
+            '/routes/codetalker-admin.php',
+            $publishedSources[base_path('routes/codetalker-admin.php')],
+        );
     }
 }

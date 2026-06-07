@@ -1,11 +1,13 @@
 <?php
 
-use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiToolsController;
+use Illuminate\Support\Facades\Route;
 use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiChatBotController;
 use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiConversationController;
+use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiMemoryController;
 use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiSystemController;
 use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiSystemPromptController;
-use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiMemoryController;
+use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiToolsController;
+
 // AI Tools routes - requires auth + manage-ai-tools permission
 Route::middleware(config('code-talker.admin_middleware', ['web', 'auth', 'can:manage-ai-tools']))
     ->prefix('admin/ai')
@@ -55,5 +57,4 @@ Route::middleware(config('code-talker.admin_middleware', ['web', 'auth', 'can:ma
         Route::get('/chat-bots/{aiChatBot}', [AiChatBotController::class, 'edit'])->name('bots.edit');
         Route::put('/chat-bots/{aiChatBot}', [AiChatBotController::class, 'update'])->name('bots.update');
         Route::delete('/chat-bots/{aiChatBot}', [AiChatBotController::class, 'destroy'])->name('bots.destroy');
-
     });
