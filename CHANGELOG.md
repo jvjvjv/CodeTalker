@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.3 — 2026-06-07
+
+This release improves package route registration and adds a supported way for host applications to publish and customize the package route files.
+
+### New Features
+- Added publishable route stubs for the package's public chatbot and admin routes via `php artisan vendor:publish --tag=code-talker-routes`.
+- Renamed the published route stub filenames to `routes/codetalker-chatbots.php` and `routes/codetalker-admin.php` so host-application overrides are clearer and less generic.
+- Updated the package to prefer those published host-app route files automatically when they exist.
+
+### Bug Fixes
+- Deferred package route registration until the host application's service providers have finished booting so literal routes such as `/login` are registered before the package root-level chatbot wildcard routes.
+
 ## 0.2.2 - 2026-06-07
 
 This patch release removes a stray package dependency and limits the default system prompt seed migration to only include the three generic prompts owned by the package. 
