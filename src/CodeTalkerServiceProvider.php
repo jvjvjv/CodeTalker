@@ -10,6 +10,7 @@ use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Observers\AiConversationObserver;
 use Jvjvjv\CodeTalker\Services\AiClientFactory;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\ServiceProvider;
 
@@ -99,8 +100,20 @@ class CodeTalkerServiceProvider extends ServiceProvider
     {
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
 
-        $this->loadRoutesFrom(__DIR__ . '/../routes/chatbots.php');
-        $this->loadRoutesFrom(__DIR__ . '/../routes/admin-ai.php');
+        // Defer route registration until after all service providers (including the host
+        // app's RouteServiceProvider) have booted. This ensures specific literal routes
+        // like /login are registered before the root-level /{aiChatBot} wildcard.
+        // The Route::has() guards skip registration if the host app has already loaded
+        // its own versions of these route files.
+        $this->app->booted(function (): void {
+            if (! Route::has('chat-bots.root.show')) {
+                $this->loadRoutesFrom(__DIR__ . '/../routes/chatbots.php');
+            }
+
+            if (! Route::has('admin.ai.index')) {
+                $this->loadRoutesFrom(__DIR__ . '/../routes/admin-ai.php');
+            }
+        });
 
         AiConversation::observe(AiConversationObserver::class);
 
