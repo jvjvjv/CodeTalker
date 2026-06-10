@@ -5,6 +5,7 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 use Inertia\Inertia;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
+use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiToolsController;
 use Jvjvjv\CodeTalker\Services\AiClientFactory;
 use Jvjvjv\CodeTalker\Tests\TestCase;
 
@@ -29,6 +30,10 @@ class PackageSmokeTest extends TestCase
     public function test_inertia_is_available_to_package_controllers(): void
     {
         $this->assertTrue(class_exists(Inertia::class));
+    }
+
+    public function test_admin_tools_controller_class_loads(): void {
+        $this->assertTrue(class_exists(AiToolsController::class));
     }
 
     public function test_it_registers_publishable_route_files(): void

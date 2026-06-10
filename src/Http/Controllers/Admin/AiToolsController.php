@@ -2,16 +2,14 @@
 
 namespace Jvjvjv\CodeTalker\Http\Controllers\Admin;
 
-use Illuminate\Http\Request;
+use Illuminate\Routing\Controller;
 use Inertia\Inertia;
 use Inertia\Response as InertiaResponse;
 
-class AiToolsController extends BaseAdminController
+class AiToolsController extends Controller
 {
-    public function index(Request $request): InertiaResponse
+    public function index(): InertiaResponse
     {
-        return Inertia::render('ai/Index', [
-            'navBlocks' => $this->navBlocksFor('/admin/ai', $request),
-        ]);
+        return Inertia::render('ai/Index');
     }
 }
