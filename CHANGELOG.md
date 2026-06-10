@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4] — 2026-06-10
+
+This patch release removes dead admin controller payload data and fixes the package's admin tools controller inheritance so the class loads cleanly.
+
+### Bug Fixes
+- Removed the unused `navBlocks` payload and helper from the admin tools controller so the package no longer sends dead data to the Inertia page.
+- Replaced the nonexistent `BaseAdminController` inheritance path in the admin tools controller so the package autoloads the controller cleanly.
+
 ## 0.2.3 — 2026-06-07
 
 This release improves package route registration and adds a supported way for host applications to publish and customize the package route files.
