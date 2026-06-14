@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0] — 2026-06-14
+
+This release adds a web page fetching tool for chatbots and fixes the LM Studio provider payload.
+
+### New Features
+- Added `FetchWebPageTool` that fetches a URL and returns its readable text content, stripping scripts, styles, and markup and truncating to 20 000 characters.
+- Exposed `ChatBotController` helper methods as `protected` so host applications can subclass the controller and override session, state, and routing behaviour.
+
+### Bug Fixes
+- Removed `enable_thinking` from the LM Studio chat payload; it is not a valid OpenAI-compatible field and was rejected by the endpoint.
+- Added `ttl=600` to the LM Studio payload to keep the loaded model alive for 10 minutes between requests.
+
 ## [0.2.4] — 2026-06-10
 
 This patch release removes dead admin controller payload data and fixes the package's admin tools controller inheritance so the class loads cleanly.
