@@ -369,13 +369,13 @@ class ChatBotController extends Controller
         ]);
     }
 
-    private function abortIfInaccessible(Request $request, AiChatBot $aiChatBot): void
+    protected function abortIfInaccessible(Request $request, AiChatBot $aiChatBot): void
     {
         abort_unless($aiChatBot->is_active, 404);
         abort_unless($aiChatBot->access_path === $this->requestAccessPath($request), 404);
     }
 
-    private function storedConversation(Request $request, AiChatBot $aiChatBot): ?AiConversation
+    protected function storedConversation(Request $request, AiChatBot $aiChatBot): ?AiConversation
     {
         $conversationPublicId = data_get($this->storedState($request, $aiChatBot), 'current');
 
@@ -407,7 +407,7 @@ class ChatBotController extends Controller
     /**
     * @return array<int, array{handle: string, label: string, is_current: bool, updated_at: string, cost_usd: ?float}>
      */
-    private function historyForBot(Request $request, AiChatBot $aiChatBot): array
+    protected function historyForBot(Request $request, AiChatBot $aiChatBot): array
     {
         $state = $this->storedState($request, $aiChatBot);
         $historyItems = collect($state['history'] ?? []);
@@ -455,7 +455,7 @@ class ChatBotController extends Controller
     /**
      * @return array{current: ?string, history: array<int, array{handle: string, public_id: string}>}
      */
-    private function storedState(Request $request, AiChatBot $aiChatBot): array
+    protected function storedState(Request $request, AiChatBot $aiChatBot): array
     {
         $state = $request->session()->get($this->stateKey($aiChatBot));
 
@@ -477,7 +477,7 @@ class ChatBotController extends Controller
     /**
      * @param array{current: ?string, history: array<int, array{handle: string, public_id: string}>} $state
      */
-    private function putStoredState(Request $request, AiChatBot $aiChatBot, array $state): void
+    protected function putStoredState(Request $request, AiChatBot $aiChatBot, array $state): void
     {
         $request->session()->put($this->stateKey($aiChatBot), $state);
         Cookie::queue(cookie()->make(
@@ -490,7 +490,7 @@ class ChatBotController extends Controller
         ));
     }
 
-    private function rememberConversation(Request $request, AiChatBot $aiChatBot, AiConversation $conversation): void
+    protected function rememberConversation(Request $request, AiChatBot $aiChatBot, AiConversation $conversation): void
     {
         $state = $this->storedState($request, $aiChatBot);
         $history = collect($state['history']);
@@ -508,25 +508,25 @@ class ChatBotController extends Controller
         ]);
     }
 
-    private function clearStoredState(Request $request, AiChatBot $aiChatBot): void
+    protected function clearStoredState(Request $request, AiChatBot $aiChatBot): void
     {
         $request->session()->forget($this->stateKey($aiChatBot));
         Cookie::queue(Cookie::forget($this->stateKey($aiChatBot)));
     }
 
-    private function stateKey(AiChatBot $aiChatBot): string
+    protected function stateKey(AiChatBot $aiChatBot): string
     {
         return 'ai_chat_bot_conversations_' . $aiChatBot->id;
     }
 
-    private function requestAccessPath(Request $request): string
+    protected function requestAccessPath(Request $request): string
     {
         return $request->routeIs('chat-bots.root.*')
             ? AiChatBot::ACCESS_PATH_ROOT
             : AiChatBot::ACCESS_PATH_CHAT;
     }
 
-    private function routeUrlFor(AiChatBot $aiChatBot, string $action): string
+    protected function routeUrlFor(AiChatBot $aiChatBot, string $action): string
     {
         $prefix = $aiChatBot->usesRootAccessPath() ? 'chat-bots.root.' : 'chat-bots.chat.';
 

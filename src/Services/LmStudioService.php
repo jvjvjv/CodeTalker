@@ -458,6 +458,7 @@ class LmStudioService implements AiClientContract, CanLoadModels
         $payload = [
             'model' => $this->model ?? $this->defaultModel,
             'max_tokens' => $this->maxTokens ?? $this->defaultMaxTokens,
+            'ttl' => 600,
             'messages' => $this->buildMessages($messages),
         ];
 
@@ -469,8 +470,6 @@ class LmStudioService implements AiClientContract, CanLoadModels
             $payload['stream'] = true;
             $payload['stream_options'] = ['include_usage' => true];
         }
-
-        $payload['enable_thinking'] = $this->enableThinking;
 
         if ($this->tools !== []) {
             $payload['tools'] = collect($this->tools)
