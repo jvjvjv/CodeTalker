@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.0] — 2026-06-18
+
+This release adds a multi-engine web search tool for chatbots, centralizes the package-owned scraper user agent, and fixes web-search execution paths.
+
+### New Features
+- Added `SearchWebTool` (`search_web`) to query Bing, Google, DuckDuckGo, and Brave, returning normalized results plus markdown links/snippets and pagination inputs for continued searching.
+- Added `WebScraperUserAgent` support helper to centralize the package-owned JayScraper user agent string and reuse it across chatbot web tools.
+- Added explicit API-versus-web execution paths for search providers (`*ViaApi` / `*ViaWeb`) to keep provider-specific transport logic separated and easier to maintain.
+
+### Bug Fixes
+- Updated chatbot web-fetch/search requests to use a single shared scraper user agent source instead of duplicating user-agent construction logic in multiple tools.
+- Fixed the DuckDuckGo web search branch to use the web HTTP client path consistently after the API/web transport split.
+
 ## [0.3.0] — 2026-06-14
 
 This release adds a web page fetching tool for chatbots and fixes the LM Studio provider payload.

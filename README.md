@@ -252,6 +252,30 @@ public function register(): void
 
 Tools are auto-discovered from registered directories. The `AiSystem::allowed_tools` array controls which discovered tools are actually exposed to the model for a given bot.
 
+### Built-in tools
+
+The package includes built-in MCP tools under `src/Services/Mcp/Tools/ChatBot`.
+
+- `fetch_web_page`: Fetches readable text from a URL.
+- `scan_memories`: Searches stored user memories for relevant context.
+- `search_web`: Searches Bing, Google, DuckDuckGo, and Brave, then returns structured results plus markdown links/snippets.
+
+To enable the web-search tool for a system, include `search_web` in `AiSystem::allowed_tools`.
+
+`search_web` input schema (high level):
+
+- `query` (required): Search query text.
+- `engines` (optional): Any subset of `bing`, `google`, `duckduckgo`, `brave`.
+- `page` (optional): Page number for continued searching.
+- `per_engine_limit` (optional): Max results per engine (1-10).
+
+`search_web` response includes:
+
+- Per-engine results with `title`, `url`, and `description`.
+- `markdown` containing clickable links and snippets.
+- `next_page_input` to continue searching on the next page.
+- Guidance for asking the model to inspect a specific link in depth.
+
 ### Injecting extra dependencies into tools
 
 If your tools need objects that aren't in the service container by default (e.g., a service scoped to the current conversation), register a parameter resolver:

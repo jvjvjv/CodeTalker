@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolHandlerContract;
 use Jvjvjv\CodeTalker\Models\AiConversation;
+use Jvjvjv\CodeTalker\Support\WebScraperUserAgent;
 use Symfony\Component\DomCrawler\Crawler;
 
 class FetchWebPageTool implements AiToolHandlerContract
@@ -63,7 +64,7 @@ class FetchWebPageTool implements AiToolHandlerContract
             $response = Http::connectTimeout(10)
                 ->timeout(20)
                 ->withHeaders([
-                    'User-Agent' => $this->userAgent(),
+                    'User-Agent' => WebScraperUserAgent::forConversation($this->conversation),
                     'Accept' => 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
                     'Accept-Language' => 'en-US,en;q=0.5',
                 ])
@@ -145,21 +146,6 @@ class FetchWebPageTool implements AiToolHandlerContract
             'content' => $this->truncateContent($content),
             'truncated' => mb_strlen($content) > self::MAX_CONTENT_LENGTH,
         ];
-    }
-
-    private function userAgent(): string
-    {
-        $chatBotName = $this->conversation->aiChatBot?->name ?? 'ChatBot';
-        $sanitizedName = trim((string) preg_replace('/[()]+/', '', $chatBotName));
-
-        if ($sanitizedName === '') {
-            $sanitizedName = 'ChatBot';
-        }
-
-        return sprintf(
-            'JayScraper/0.2.0 (name: %s; purpose: research; contact: https://jasonvertucio.com)',
-            $sanitizedName,
-        );
     }
 
     private function isHtmlResponse(string $contentType): bool
