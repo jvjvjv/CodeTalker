@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1] — 2026-06-18
+
+This patch release fixes PHP 8.2 and 8.3 compatibility for the `symfony/dom-crawler` dependency added in 0.4.0.
+
+### Bug Fixes
+- Widened the `symfony/dom-crawler` constraint to `^7.4 || ^8.1` so the package installs cleanly on PHP 8.2 and 8.3 (resolves v7.4.x) while still using the latest v8.x on PHP 8.4+.
+
 ## [0.4.0] — 2026-06-18
 
 This release adds a multi-engine web search tool for chatbots, centralizes the package-owned scraper user agent, and fixes web-search execution paths.
