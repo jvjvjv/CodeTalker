@@ -4,6 +4,7 @@ namespace Jvjvjv\CodeTalker\Services\Mcp;
 
 use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolHandlerContract;
 use Illuminate\Support\Facades\File;
+use Laravel\Mcp\Server\Tool;
 use ReflectionClass;
 use SplFileInfo;
 
@@ -12,10 +13,14 @@ trait DiscoversAiToolHandlers
     /**
      * Discover tool handlers from the given path→namespace map.
      *
+     * Handlers are laravel/mcp {@see Tool} subclasses or, for backward
+     * compatibility, legacy {@see AiToolHandlerContract} implementations. Both
+     * expose a name() method used to key the returned map.
+     *
      * @param array<string, string> $toolDirectories  Absolute path → PSR-4 namespace prefix (with trailing backslash)
      * @param array<string, mixed> $parameterOverrides  Container make() overrides passed to each handler
      * @param array<int, string> $preferredRelativePrefixes  Relative path prefixes to prioritise in sort order
-     * @return array<string, AiToolHandlerContract>
+     * @return array<string, Tool|AiToolHandlerContract>
      */
     private function discoverHandlers(
         array $toolDirectories,
@@ -53,7 +58,10 @@ trait DiscoversAiToolHandlers
 
             $reflection = new ReflectionClass($className);
 
-            if ($reflection->isAbstract() || !$reflection->implementsInterface(AiToolHandlerContract::class)) {
+            $isTool = $reflection->isSubclassOf(Tool::class);
+            $isLegacyHandler = $reflection->implementsInterface(AiToolHandlerContract::class);
+
+            if ($reflection->isAbstract() || (!$isTool && !$isLegacyHandler)) {
                 continue;
             }
 

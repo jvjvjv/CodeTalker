@@ -2,124 +2,113 @@
 
 namespace Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot;
 
+use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolHandlerContract;
-use Jvjvjv\CodeTalker\Models\AiConversation;
+use Jvjvjv\CodeTalker\Support\ToolContext;
 use Jvjvjv\CodeTalker\Support\WebScraperUserAgent;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Attributes\Name;
+use Laravel\Mcp\Server\Tool;
 use Symfony\Component\DomCrawler\Crawler;
 
-class FetchWebPageTool implements AiToolHandlerContract
+#[Name('fetch-web-page')]
+#[Description('Fetch a web page by URL and return its readable text content using the JayScraper research user agent.')]
+class FetchWebPageTool extends Tool
 {
     private const MAX_BODY_LENGTH = 150000;
 
     private const MAX_CONTENT_LENGTH = 20000;
 
     public function __construct(
-        private AiConversation $conversation,
+        private ToolContext $context,
     ) {}
 
-    public function name(): string
-    {
-        return 'fetch_web_page';
-    }
-
-    public function description(): string
-    {
-        return 'Fetch a web page by URL and return its readable text content using the JayScraper research user agent.';
-    }
-
-    public function schema(): array
+    /**
+     * @return array<string, \Illuminate\JsonSchema\Types\Type>
+     */
+    public function schema(JsonSchema $schema): array
     {
         return [
-            'type' => 'object',
-            'properties' => [
-                'url' => [
-                    'type' => 'string',
-                    'format' => 'uri',
-                    'description' => 'The full http or https URL of the web page to fetch.',
-                ],
-            ],
-            'required' => ['url'],
+            'url' => $schema->string()
+                ->format('uri')
+                ->description('The full http or https URL of the web page to fetch.')
+                ->required(),
         ];
     }
 
-    public function handle(array $input): array
+    public function handle(Request $request): Response|ResponseFactory
     {
-        $url = trim((string) ($input['url'] ?? ''));
+        $url = trim((string) $request->get('url', ''));
 
         if ($url === '') {
-            return ['error' => 'A URL is required.'];
+            return Response::error('A URL is required.');
         }
 
         $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
         $host = (string) parse_url($url, PHP_URL_HOST);
 
         if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
-            return ['error' => 'The URL must be a valid http or https address.'];
+            return Response::error('The URL must be a valid http or https address.');
         }
 
         try {
             $response = Http::connectTimeout(10)
                 ->timeout(20)
                 ->withHeaders([
-                    'User-Agent' => WebScraperUserAgent::forConversation($this->conversation),
+                    'User-Agent' => WebScraperUserAgent::forBotName($this->context->botName()),
                     'Accept' => 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
                     'Accept-Language' => 'en-US,en;q=0.5',
                 ])
                 ->get($url);
         } catch (ConnectionException $e) {
-            Log::warning('fetch_web_page could not connect', [
+            Log::warning('fetch-web-page could not connect', [
                 'url' => $url,
                 'error' => $e->getMessage(),
             ]);
 
-            return [
-                'error' => sprintf('Could not connect to %s. The request failed before receiving a response.', $url),
-                'url' => $url,
-            ];
+            return Response::error(sprintf('Could not connect to %s. The request failed before receiving a response.', $url));
         }
 
         if ($response->failed()) {
-            Log::warning('fetch_web_page received an error response', [
+            Log::warning('fetch-web-page received an error response', [
                 'url' => $url,
                 'status' => $response->status(),
             ]);
 
-            return [
-                'error' => sprintf(
-                    'Failed to fetch %s. The server responded with HTTP status %d (%s).',
-                    $url,
-                    $response->status(),
-                    $response->reason() ?: 'Unknown',
-                ),
-                'url' => $url,
-                'status' => $response->status(),
-            ];
+            return Response::error(sprintf(
+                'Failed to fetch %s. The server responded with HTTP status %d (%s).',
+                $url,
+                $response->status(),
+                $response->reason() ?: 'Unknown',
+            ));
         }
 
         $contentType = strtolower((string) ($response->header('Content-Type') ?? ''));
         $body = mb_substr($response->body(), 0, self::MAX_BODY_LENGTH);
 
         if ($body === '') {
-            return ['error' => 'The page returned an empty response body.'];
+            return Response::error('The page returned an empty response body.');
         }
 
         if (str_contains($contentType, 'text/plain')) {
             $content = $this->normalizeWhitespace($body);
 
-            return [
+            return Response::structured([
                 'url' => $url,
                 'title' => null,
                 'content_type' => $contentType,
                 'content' => $this->truncateContent($content),
                 'truncated' => mb_strlen($content) > self::MAX_CONTENT_LENGTH,
-            ];
+            ]);
         }
 
         if (!$this->isHtmlResponse($contentType)) {
-            return ['error' => 'The URL did not return an HTML or plain text page.'];
+            return Response::error('The URL did not return an HTML or plain text page.');
         }
 
         $title = null;
@@ -136,16 +125,16 @@ class FetchWebPageTool implements AiToolHandlerContract
         $content = $this->extractReadableText($body);
 
         if ($content === '') {
-            return ['error' => 'No readable page content could be extracted.'];
+            return Response::error('No readable page content could be extracted.');
         }
 
-        return [
+        return Response::structured([
             'url' => $url,
             'title' => $title !== '' ? $title : null,
             'content_type' => $contentType,
             'content' => $this->truncateContent($content),
             'truncated' => mb_strlen($content) > self::MAX_CONTENT_LENGTH,
-        ];
+        ]);
     }
 
     private function isHtmlResponse(string $contentType): bool

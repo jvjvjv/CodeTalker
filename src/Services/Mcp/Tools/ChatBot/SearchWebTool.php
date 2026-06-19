@@ -2,14 +2,22 @@
 
 namespace Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot;
 
+use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolHandlerContract;
-use Jvjvjv\CodeTalker\Models\AiConversation;
+use Jvjvjv\CodeTalker\Support\ToolContext;
 use Jvjvjv\CodeTalker\Support\WebScraperUserAgent;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Attributes\Name;
+use Laravel\Mcp\Server\Tool;
 
-class SearchWebTool implements AiToolHandlerContract
+#[Name('search-web')]
+#[Description('Search across Bing, Google, DuckDuckGo, and Brave. Returns normalized links, descriptions, and markdown-formatted results for easy follow-up.')]
+class SearchWebTool extends Tool
 {
     private const DEFAULT_PAGE = 1;
 
@@ -18,87 +26,64 @@ class SearchWebTool implements AiToolHandlerContract
     private const SUPPORTED_ENGINES = ['bing', 'google', 'duckduckgo', 'brave'];
 
     public function __construct(
-        private AiConversation $conversation,
+        private ToolContext $context,
     ) {}
 
-    public function name(): string
-    {
-        return 'search_web';
-    }
-
-    public function description(): string
-    {
-        return 'Search across Bing, Google, DuckDuckGo, and Brave. Returns normalized links, descriptions, and markdown-formatted results for easy follow-up.';
-    }
-
-    public function schema(): array
+    /**
+     * @return array<string, \Illuminate\JsonSchema\Types\Type>
+     */
+    public function schema(JsonSchema $schema): array
     {
         return [
-            'type' => 'object',
-            'properties' => [
-                'query' => [
-                    'type' => 'string',
-                    'description' => 'The search query to run.',
-                    'minLength' => 1,
-                ],
-                'engines' => [
-                    'type' => 'array',
-                    'description' => 'Subset of engines to use. Defaults to all supported engines.',
-                    'items' => [
-                        'type' => 'string',
-                        'enum' => self::SUPPORTED_ENGINES,
-                    ],
-                    'minItems' => 1,
-                    'maxItems' => 4,
-                ],
-                'page' => [
-                    'type' => 'integer',
-                    'description' => 'Result page number (1-20). Increase to continue searching.',
-                    'minimum' => 1,
-                    'maximum' => self::MAX_PAGE,
-                    'default' => self::DEFAULT_PAGE,
-                ],
-                'per_engine_limit' => [
-                    'type' => 'integer',
-                    'description' => 'Maximum results to return per engine (1-10).',
-                    'minimum' => 1,
-                    'maximum' => 10,
-                    'default' => 5,
-                ],
-            ],
-            'required' => ['query'],
+            'query' => $schema->string()
+                ->description('The search query to run.')
+                ->min(1)
+                ->required(),
+            'engines' => $schema->array()
+                ->items($schema->string()->enum(self::SUPPORTED_ENGINES))
+                ->min(1)
+                ->max(4)
+                ->description('Subset of engines to use. Defaults to all supported engines.'),
+            'page' => $schema->integer()
+                ->description('Result page number (1-20). Increase to continue searching.')
+                ->min(1)
+                ->max(self::MAX_PAGE)
+                ->default(self::DEFAULT_PAGE),
+            'per_engine_limit' => $schema->integer()
+                ->description('Maximum results to return per engine (1-10).')
+                ->min(1)
+                ->max(10)
+                ->default(5),
         ];
     }
 
-    public function handle(array $input): array
+    public function handle(Request $request): Response|ResponseFactory
     {
-        $query = trim((string) ($input['query'] ?? ''));
+        $query = trim((string) $request->get('query', ''));
 
         if ($query === '') {
-            return ['error' => 'A non-empty query is required.'];
+            return Response::error('A non-empty query is required.');
         }
 
         $enginesInput = array_values(array_unique(array_map(
             static fn ($engine): string => strtolower(trim((string) $engine)),
-            (array) ($input['engines'] ?? self::SUPPORTED_ENGINES),
+            (array) ($request->get('engines') ?? self::SUPPORTED_ENGINES),
         )));
 
         $engines = $enginesInput !== [] ? $enginesInput : self::SUPPORTED_ENGINES;
         $unsupported = array_values(array_diff($engines, self::SUPPORTED_ENGINES));
 
         if ($unsupported !== []) {
-            return [
-                'error' => sprintf(
-                    'Unsupported engines: %s. Supported engines are: %s.',
-                    implode(', ', $unsupported),
-                    implode(', ', self::SUPPORTED_ENGINES),
-                ),
-            ];
+            return Response::error(sprintf(
+                'Unsupported engines: %s. Supported engines are: %s.',
+                implode(', ', $unsupported),
+                implode(', ', self::SUPPORTED_ENGINES),
+            ));
         }
 
-        $limit = (int) ($input['per_engine_limit'] ?? 5);
+        $limit = (int) ($request->get('per_engine_limit') ?? 5);
         $limit = max(1, min(10, $limit));
-        $page = (int) ($input['page'] ?? self::DEFAULT_PAGE);
+        $page = (int) ($request->get('page') ?? self::DEFAULT_PAGE);
         $page = max(1, min(self::MAX_PAGE, $page));
 
         $resultsByEngine = [];
@@ -107,7 +92,7 @@ class SearchWebTool implements AiToolHandlerContract
             try {
                 $resultsByEngine[$engine] = $this->searchEngine($engine, $query, $limit, $page);
             } catch (\Throwable $e) {
-                Log::warning('search_web engine search failed', [
+                Log::warning('search-web engine search failed', [
                     'engine' => $engine,
                     'query' => $query,
                     'error' => $e->getMessage(),
@@ -120,7 +105,7 @@ class SearchWebTool implements AiToolHandlerContract
             }
         }
 
-        return [
+        return Response::structured([
             'query' => $query,
             'page' => $page,
             'engines' => $engines,
@@ -137,7 +122,7 @@ class SearchWebTool implements AiToolHandlerContract
                 'Continue searching with a refined query and optional engine subset.',
                 'Ask the model to fetch and inspect a specific result URL on your behalf.',
             ],
-        ];
+        ]);
     }
 
     /**
@@ -411,7 +396,7 @@ class SearchWebTool implements AiToolHandlerContract
         return Http::connectTimeout(10)
             ->timeout(20)
             ->withHeaders([
-                'User-Agent' => WebScraperUserAgent::forConversation($this->conversation),
+                'User-Agent' => WebScraperUserAgent::forBotName($this->context->botName()),
                 'Accept' => 'text/html,application/xhtml+xml,application/json,text/plain;q=0.9,*/*;q=0.8',
                 'Accept-Language' => 'en-US,en;q=0.5',
             ]);

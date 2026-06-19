@@ -28,7 +28,8 @@
     "google-gemini-php/client": "^2.7",
     "guzzlehttp/guzzle": "^7.0",
     "inertiajs/inertia-laravel": "^2.0 || ^3.0",
-    "symfony/dom-crawler": "^7.4 || ^8.1"
+    "symfony/dom-crawler": "^7.4 || ^8.1",
+    "laravel/mcp": "^0.8.1"
   },
   "suggest": {
     "bspdx/keystone": "Suggested for host-app authorization around admin AI routes and related access control wiring."

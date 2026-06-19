@@ -2,64 +2,85 @@
 
 namespace Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot;
 
-use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolHandlerContract;
-use Jvjvjv\CodeTalker\Models\AiConversation;
-use Jvjvjv\CodeTalker\Models\AiFeatureMemory;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Database\Eloquent\Builder;
+use Jvjvjv\CodeTalker\Models\AiFeatureMemory;
+use Jvjvjv\CodeTalker\Support\ToolContext;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Attributes\Name;
+use Laravel\Mcp\Server\Tool;
 
-class ScanMemoriesTool implements AiToolHandlerContract
+#[Name('scan-memories')]
+#[Description(
+    'Search stored memories about the user for topics or keywords relevant to the current conversation. '
+    . 'Use this when you need to check if you have specific context stored about the user '
+    . 'that may not have been included in your initial instructions.'
+)]
+class ScanMemoriesTool extends Tool
 {
     public function __construct(
-        private AiConversation $conversation,
+        private ToolContext $context,
     ) {}
 
-    public function name(): string
+    /**
+     * Only advertise this tool when there is a user identity to scope memories by.
+     *
+     * Consulted by the external MCP server when listing tools (laravel/mcp's
+     * {@see \Laravel\Mcp\Server\Primitive::eligibleForRegistration()}). On the
+     * MCP transport the ToolContext is built from the authenticated caller, so
+     * an anonymous caller never sees this tool. This is not consulted by the
+     * local chat loop, which gates tools via AiSystem::allowed_tools instead.
+     */
+    public function shouldRegister(): bool
     {
-        return 'scan_memories';
+        return $this->context->hasIdentity();
     }
 
-    public function description(): string
-    {
-        return 'Search stored memories about the user for topics or keywords relevant to the current conversation. '
-            . 'Use this when you need to check if you have specific context stored about the user '
-            . 'that may not have been included in your initial instructions.';
-    }
-
-    public function schema(): array
+    /**
+     * @return array<string, \Illuminate\JsonSchema\Types\Type>
+     */
+    public function schema(JsonSchema $schema): array
     {
         return [
-            'type' => 'object',
-            'properties' => [
-                'topics' => [
-                    'type' => 'array',
-                    'items' => ['type' => 'string'],
-                    'description' => 'Keywords or topics to search memories for (e.g. ["PHP", "preferred stack", "timezone"]).',
-                    'minItems' => 1,
-                    'maxItems' => 10,
-                ],
-            ],
-            'required' => ['topics'],
+            'topics' => $schema->array()
+                ->items($schema->string())
+                ->min(1)
+                ->max(10)
+                ->description('Keywords or topics to search memories for (e.g. ["PHP", "preferred stack", "timezone"]).')
+                ->required(),
         ];
     }
 
-    public function handle(array $input): array
+    public function handle(Request $request): Response|ResponseFactory
     {
-        $topics = array_filter((array) ($input['topics'] ?? []));
+        $topics = array_filter((array) ($request->get('topics') ?? []));
 
         if ($topics === []) {
-            return ['error' => 'At least one topic is required.'];
+            return Response::error('At least one topic is required.');
         }
 
-        $query = AiFeatureMemory::query()
-            ->forFeature($this->conversation->feature)
-            ->active();
+        if (!$this->context->hasIdentity()) {
+            return Response::structured([
+                'memories' => [],
+                'message' => 'No user identity for this conversation.',
+            ]);
+        }
 
-        if ($this->conversation->user_id !== null) {
-            $query->where('user_id', $this->conversation->user_id);
-        } elseif ($this->conversation->visitor_email !== null) {
-            $query->where('visitor_email', $this->conversation->visitor_email);
+        $query = AiFeatureMemory::query()->active();
+
+        // The local chat loop scopes by feature; an external MCP caller has no
+        // conversation, so we scan across all of the authenticated user's memories.
+        if ($this->context->feature !== null) {
+            $query->forFeature($this->context->feature);
+        }
+
+        if ($this->context->userId !== null) {
+            $query->where('user_id', $this->context->userId);
         } else {
-            return ['memories' => [], 'message' => 'No user identity for this conversation.'];
+            $query->where('visitor_email', $this->context->visitorEmail);
         }
 
         $query->where(function (Builder $q) use ($topics): void {
@@ -75,7 +96,10 @@ class ScanMemoriesTool implements AiToolHandlerContract
             ->get(['category', 'key', 'content', 'confidence']);
 
         if ($memories->isEmpty()) {
-            return ['memories' => [], 'message' => 'No memories found matching those topics.'];
+            return Response::structured([
+                'memories' => [],
+                'message' => 'No memories found matching those topics.',
+            ]);
         }
 
         $grouped = $memories->groupBy('category')->map(
@@ -86,6 +110,6 @@ class ScanMemoriesTool implements AiToolHandlerContract
             ])->values()->toArray()
         )->toArray();
 
-        return ['memories' => $grouped];
+        return Response::structured(['memories' => $grouped]);
     }
 }

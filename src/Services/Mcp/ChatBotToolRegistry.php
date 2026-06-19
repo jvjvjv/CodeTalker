@@ -7,12 +7,15 @@ use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolHandlerContract;
 use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolRegistryContract;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Services\AiMemoryService;
+use Jvjvjv\CodeTalker\Support\ToolContext;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Server\Tool;
 
 class ChatBotToolRegistry implements AiToolRegistryContract
 {
     use DiscoversAiToolHandlers;
 
-    /** @var array<string, AiToolHandlerContract> */
+    /** @var array<string, Tool|AiToolHandlerContract> */
     private array $handlers = [];
 
     /**
@@ -26,6 +29,9 @@ class ChatBotToolRegistry implements AiToolRegistryContract
         array $extraParameterOverrides = [],
     ) {
         $baseOverrides = [
+            // New canonical context for laravel/mcp Tool subclasses.
+            'context' => ToolContext::forConversation($conversation),
+            // Retained for backward compatibility with legacy AiToolHandlerContract tools.
             'conversation' => $conversation,
             'memoryService' => app(AiMemoryService::class),
             'userId' => $conversation->user_id,
@@ -67,7 +73,7 @@ class ChatBotToolRegistry implements AiToolRegistryContract
 
         $this->handlers = array_filter(
             $handlers,
-            static fn (AiToolHandlerContract $handler, string $name): bool => isset($allowedLookup[$name]),
+            static fn (object $handler, string $name): bool => isset($allowedLookup[$name]),
             ARRAY_FILTER_USE_BOTH,
         );
     }
@@ -78,11 +84,24 @@ class ChatBotToolRegistry implements AiToolRegistryContract
     public function toApiTools(): array
     {
         return array_values(array_map(
-            static fn (AiToolHandlerContract $handler): array => [
-                'name' => $handler->name(),
-                'description' => $handler->description(),
-                'input_schema' => $handler->schema(),
-            ],
+            static function (object $handler): array {
+                if ($handler instanceof Tool) {
+                    $serialized = $handler->toArray();
+
+                    return [
+                        'name' => $serialized['name'],
+                        'description' => (string) ($serialized['description'] ?? ''),
+                        'input_schema' => $serialized['inputSchema'] ?? ['type' => 'object', 'properties' => (object) []],
+                    ];
+                }
+
+                /** @var AiToolHandlerContract $handler */
+                return [
+                    'name' => $handler->name(),
+                    'description' => $handler->description(),
+                    'input_schema' => $handler->schema(),
+                ];
+            },
             $this->handlers,
         ));
     }
@@ -97,6 +116,12 @@ class ChatBotToolRegistry implements AiToolRegistryContract
             return ['error' => "Unknown tool: {$toolName}"];
         }
 
-        return $this->handlers[$toolName]->handle($input);
+        $handler = $this->handlers[$toolName];
+
+        if ($handler instanceof Tool) {
+            return ToolResultConverter::toArray($handler->handle(new Request($input)));
+        }
+
+        return $handler->handle($input);
     }
 }

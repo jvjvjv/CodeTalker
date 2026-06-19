@@ -55,6 +55,38 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | External MCP Server
+    |--------------------------------------------------------------------------
+    |
+    | The same chat-bot tools can be exposed to external MCP clients (Claude
+    | Desktop, Grok, etc.) through a laravel/mcp server. This is disabled by
+    | default. When enabled, the package registers the server using the Mcp
+    | facade during boot.
+    |
+    | The web transport is HTTP and should be protected with authentication
+    | middleware — the authenticated user is mapped to the tool ToolContext so
+    | user-scoped tools (e.g. scan-memories) resolve the correct identity. The
+    | local (stdio) transport runs as the `mcp:start {handle}` Artisan command.
+    |
+    */
+
+    'mcp' => [
+        'enabled' => env('CODE_TALKER_MCP_ENABLED', false),
+
+        'web' => [
+            'enabled' => env('CODE_TALKER_MCP_WEB_ENABLED', true),
+            'path' => env('CODE_TALKER_MCP_PATH', 'mcp/code-talker'),
+            'middleware' => ['auth:sanctum'],
+        ],
+
+        'local' => [
+            'enabled' => env('CODE_TALKER_MCP_LOCAL_ENABLED', false),
+            'handle' => env('CODE_TALKER_MCP_LOCAL_HANDLE', 'code-talker'),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | AI Providers
     |--------------------------------------------------------------------------
     |

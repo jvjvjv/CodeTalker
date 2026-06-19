@@ -35,13 +35,13 @@ php artisan vendor:publish --tag=code-talker-routes
 
 `config/code-talker.php` controls package-wide behavior:
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `user_model` | `App\Models\User::class` | Eloquent model used for authenticated users |
-| `middleware` | `['web']` | Middleware applied to public chat routes |
-| `admin_middleware` | `['web', 'auth', 'can:manage-ai-tools']` | Middleware applied to admin routes |
-| `reserved_slugs` | `[]` | Additional slugs that cannot be used for root-path chatbots |
-| `schedule` | `true` | Set to `false` to disable the package's automatic scheduled jobs |
+| Key                | Default                                  | Description                                                      |
+| ------------------ | ---------------------------------------- | ---------------------------------------------------------------- |
+| `user_model`       | `App\Models\User::class`                 | Eloquent model used for authenticated users                      |
+| `middleware`       | `['web']`                                | Middleware applied to public chat routes                         |
+| `admin_middleware` | `['web', 'auth', 'can:manage-ai-tools']` | Middleware applied to admin routes                               |
+| `reserved_slugs`   | `[]`                                     | Additional slugs that cannot be used for root-path chatbots      |
+| `schedule`         | `true`                                   | Set to `false` to disable the package's automatic scheduled jobs |
 
 ### Suggested host-app packages
 
@@ -50,6 +50,7 @@ php artisan vendor:publish --tag=code-talker-routes
 ### Provider environment variables
 
 **Anthropic**
+
 ```
 ANTHROPIC_API_KEY=
 ANTHROPIC_MODEL=claude-sonnet-4-6
@@ -59,6 +60,7 @@ ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
 ```
 
 **OpenAI**
+
 ```
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
@@ -67,6 +69,7 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
 **Google Gemini**
+
 ```
 GEMINI_API_KEY=
 GEMINI_MODEL=gemini-2.5-flash
@@ -74,6 +77,7 @@ GEMINI_MAX_TOKENS=1024
 ```
 
 **xAI Grok**
+
 ```
 GROK_MODEL=grok-3-mini
 GROK_MAX_TOKENS=1024
@@ -81,6 +85,7 @@ GROK_BASE_URL=https://api.x.ai/v1
 ```
 
 **LM Studio**
+
 ```
 LMSTUDIO_SERVER_URL=http://localhost:1234
 LMSTUDIO_MODEL=
@@ -93,18 +98,18 @@ LMSTUDIO_MAX_TOKENS=1024
 
 An `AiSystem` record represents a fully configured provider endpoint. Create one through the admin UI at `/admin/ai/systems` or via a seeder. Key fields:
 
-| Field | Description |
-|-------|-------------|
-| `provider` | One of: `anthropic`, `openai`, `openai_compatible`, `gemini`, `grok`, `lm-studio` |
-| `model` | Provider-specific model name |
-| `api_key` | Stored encrypted |
-| `max_tokens` | Maximum output tokens per request |
-| `temperature` | Sampling temperature (overrides bot-level default) |
-| `context_length` | Context window for local models (LM Studio) |
-| `enable_thinking` | Enable extended thinking / reasoning output (Anthropic) |
-| `allowed_tools` | Array of tool names the model may invoke |
-| `system_prompt_id` | Optional FK to an `AiSystemPrompt` record |
-| `is_active` | Inactive systems are rejected by the factory |
+| Field              | Description                                                                       |
+| ------------------ | --------------------------------------------------------------------------------- |
+| `provider`         | One of: `anthropic`, `openai`, `openai_compatible`, `gemini`, `grok`, `lm-studio` |
+| `model`            | Provider-specific model name                                                      |
+| `api_key`          | Stored encrypted                                                                  |
+| `max_tokens`       | Maximum output tokens per request                                                 |
+| `temperature`      | Sampling temperature (overrides bot-level default)                                |
+| `context_length`   | Context window for local models (LM Studio)                                       |
+| `enable_thinking`  | Enable extended thinking / reasoning output (Anthropic)                           |
+| `allowed_tools`    | Array of tool names the model may invoke                                          |
+| `system_prompt_id` | Optional FK to an `AiSystemPrompt` record                                         |
+| `is_active`        | Inactive systems are rejected by the factory                                      |
 
 ### Getting a client in code
 
@@ -139,16 +144,16 @@ Map a feature key to a default `AiSystem` via the `ai_system_feature_defaults` t
 
 An `AiChatBot` defines a user-facing persona. Create one at `/admin/ai/chat-bots`. Key fields:
 
-| Field | Description |
-|-------|-------------|
-| `ai_system_id` | The backing `AiSystem` |
-| `name` | Display name |
-| `slug` | URL-safe identifier, must be unique |
-| `access_path` | `chat` → `/chat/{slug}`, `root` → `/{slug}` |
-| `prompt_template` | System prompt with optional placeholders (see below) |
-| `require_visitor_identity` | Prompt anonymous visitors for name and email |
-| `tools_enabled` | Whether the bot may invoke registered tools |
-| `temperature` | Overrides `AiSystem` temperature for this bot |
+| Field                      | Description                                          |
+| -------------------------- | ---------------------------------------------------- |
+| `ai_system_id`             | The backing `AiSystem`                               |
+| `name`                     | Display name                                         |
+| `slug`                     | URL-safe identifier, must be unique                  |
+| `access_path`              | `chat` → `/chat/{slug}`, `root` → `/{slug}`          |
+| `prompt_template`          | System prompt with optional placeholders (see below) |
+| `require_visitor_identity` | Prompt anonymous visitors for name and email         |
+| `tools_enabled`            | Whether the bot may invoke registered tools          |
+| `temperature`              | Overrides `AiSystem` temperature for this bot        |
 
 Chatbot authentication and authorization are not managed by this package. The
 consuming application must decide which users or guests can reach chatbot
@@ -159,13 +164,13 @@ routes.
 
 These tokens are replaced when a conversation starts:
 
-| Placeholder | Value |
-|-------------|-------|
-| `{{bot_name}}` | Bot's display name |
-| `{{bot_slug}}` | Bot's slug |
-| `{{bot_description}}` | Bot's description field |
-| `{{visitor_name}}` | Name collected from anonymous visitor (if any) |
-| `{{visitor_email}}` | Email collected from anonymous visitor (if any) |
+| Placeholder           | Value                                           |
+| --------------------- | ----------------------------------------------- |
+| `{{bot_name}}`        | Bot's display name                              |
+| `{{bot_slug}}`        | Bot's slug                                      |
+| `{{bot_description}}` | Bot's description field                         |
+| `{{visitor_name}}`    | Name collected from anonymous visitor (if any)  |
+| `{{visitor_email}}`   | Email collected from anonymous visitor (if any) |
 
 The final system prompt is assembled as: `AiSystemPrompt.content` + prompt template + `## Learned Insights` (injected memories).
 
@@ -182,18 +187,18 @@ chatbot routes should require authentication or further authorization, enforce
 that entirely in the consuming application by changing `code-talker.middleware`
 or wrapping the package routes in your own authorization layer.
 
-| Route | Description |
-|-------|-------------|
-| `GET /chats` | List of available bots (Inertia: `ai/ChatBotsIndex`) |
-| `GET /chats/statuses` | JSON model-readiness status for all bots |
-| `GET /chat/{slug}` | Chat UI for a bot (Inertia: `ai/ChatBot`) |
-| `GET /chat/{slug}/new` | Start a new conversation |
-| `GET /chat/{slug}/status` | JSON readiness status for one bot |
-| `POST /chat/{slug}/warmup` | Warm up the model |
-| `POST /chat/{slug}/messages` | Send a message (SSE stream) |
-| `POST /chat/{slug}/reset` | Clear current conversation |
-| `POST /chat/{slug}/switch` | Switch to a different conversation from history |
-| `GET /chat/{slug}/{hash}` | Load a conversation by its shareable hash |
+| Route                        | Description                                          |
+| ---------------------------- | ---------------------------------------------------- |
+| `GET /chats`                 | List of available bots (Inertia: `ai/ChatBotsIndex`) |
+| `GET /chats/statuses`        | JSON model-readiness status for all bots             |
+| `GET /chat/{slug}`           | Chat UI for a bot (Inertia: `ai/ChatBot`)            |
+| `GET /chat/{slug}/new`       | Start a new conversation                             |
+| `GET /chat/{slug}/status`    | JSON readiness status for one bot                    |
+| `POST /chat/{slug}/warmup`   | Warm up the model                                    |
+| `POST /chat/{slug}/messages` | Send a message (SSE stream)                          |
+| `POST /chat/{slug}/reset`    | Clear current conversation                           |
+| `POST /chat/{slug}/switch`   | Switch to a different conversation from history      |
+| `GET /chat/{slug}/{hash}`    | Load a conversation by its shareable hash            |
 
 Root-access-path bots duplicate the above at `/{slug}` instead of `/chat/{slug}`.
 
@@ -203,38 +208,53 @@ The browser's active and historical conversations are stored in a session key an
 
 ## Tool Registration
 
-Tools follow an MCP-style contract. Implement `AiToolHandlerContract`:
+Tools are [laravel/mcp](https://github.com/laravel/mcp) `Tool` classes. The same
+class runs in the local chat loop **and** can be exposed to external MCP clients
+(see [External MCP Server](#external-mcp-server)). Extend `Laravel\Mcp\Server\Tool`:
 
 ```php
-use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolHandlerContract;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Jvjvjv\CodeTalker\Support\ToolContext;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Attributes\Name;
+use Laravel\Mcp\Server\Tool;
 
-class GetWeatherTool implements AiToolHandlerContract
+#[Name('get-weather')]
+#[Description('Returns current weather for a given city.')]
+class GetWeatherTool extends Tool
 {
-    public function name(): string { return 'get_weather'; }
+    public function __construct(
+        private ToolContext $context,
+    ) {}
 
-    public function description(): string
-    {
-        return 'Returns current weather for a given city.';
-    }
-
-    public function schema(): array
+    public function schema(JsonSchema $schema): array
     {
         return [
-            'type' => 'object',
-            'properties' => [
-                'city' => ['type' => 'string', 'description' => 'City name'],
-            ],
-            'required' => ['city'],
+            'city' => $schema->string()->description('City name')->required(),
         ];
     }
 
-    public function handle(array $input): array
+    public function handle(Request $request): Response|ResponseFactory
     {
         // ... fetch weather ...
-        return ['temperature' => '72°F', 'condition' => 'Sunny'];
+        return Response::structured(['temperature' => '72°F', 'condition' => 'Sunny']);
+        // Use Response::error('...') to signal a failure to the model.
     }
 }
 ```
+
+Notes:
+
+- The tool **name** defaults to the kebab-cased class basename (`GetWeatherTool` →
+  `get-weather-tool`), so set an explicit `#[Name('get-weather')]` for a clean name.
+- Inject `ToolContext` for the current user/conversation rather than depending on
+  `AiConversation` directly. In the local chat loop it carries the live
+  conversation (`$context->conversation`), derived `userId`, `visitorEmail`, and
+  `feature`. When the tool is called by an external MCP client it carries the
+  authenticated user's id with no conversation, so guard conversation-only logic.
 
 Register the directory containing your tools in `AppServiceProvider`:
 
@@ -250,26 +270,35 @@ public function register(): void
 }
 ```
 
-Tools are auto-discovered from registered directories. The `AiSystem::allowed_tools` array controls which discovered tools are actually exposed to the model for a given bot.
+Tools are auto-discovered from registered directories. The `AiSystem::allowed_tools`
+array controls which discovered tools are exposed to the model for a given bot, by
+tool name.
+
+> **Upgrading from a previous version:** the old `AiToolHandlerContract`
+> (`name()`/`description()`/`schema(): array`/`handle(array): array`) is deprecated
+> but still discovered and dispatched for backward compatibility. Migrate to
+> `Laravel\Mcp\Server\Tool` as shown above. The built-in tools were also renamed
+> from snake_case to kebab-case — run the published migration to update any
+> persisted `allowed_tools` values.
 
 ### Built-in tools
 
-The package includes built-in MCP tools under `src/Services/Mcp/Tools/ChatBot`.
+The package includes built-in tools under `src/Services/Mcp/Tools/ChatBot`.
 
-- `fetch_web_page`: Fetches readable text from a URL.
-- `scan_memories`: Searches stored user memories for relevant context.
-- `search_web`: Searches Bing, Google, DuckDuckGo, and Brave, then returns structured results plus markdown links/snippets.
+- `fetch-web-page`: Fetches readable text from a URL.
+- `scan-memories`: Searches stored user memories for relevant context.
+- `search-web`: Searches Bing, Google, DuckDuckGo, and Brave, then returns structured results plus markdown links/snippets.
 
-To enable the web-search tool for a system, include `search_web` in `AiSystem::allowed_tools`.
+To enable the web-search tool for a system, include `search-web` in `AiSystem::allowed_tools`.
 
-`search_web` input schema (high level):
+`search-web` input schema (high level):
 
 - `query` (required): Search query text.
 - `engines` (optional): Any subset of `bing`, `google`, `duckduckgo`, `brave`.
 - `page` (optional): Page number for continued searching.
 - `per_engine_limit` (optional): Max results per engine (1-10).
 
-`search_web` response includes:
+`search-web` response includes:
 
 - Per-engine results with `title`, `url`, and `description`.
 - `markdown` containing clickable links and snippets.
@@ -290,21 +319,65 @@ CodeTalkerServiceProvider::registerToolParameterResolver(
 
 The resolver is called once per `ChatBotToolRegistry` instantiation, and its return values are passed as `makeWith()` overrides when tools are resolved from the container.
 
+## External MCP Server
+
+Because tools are laravel/mcp `Tool` classes, the same tools can be exposed to
+external MCP clients (Claude Desktop, Grok, etc.) through a bundled
+`CodeTalkerServer`. This is **disabled by default**. Enable it under the
+`code-talker.mcp` config key:
+
+```php
+'mcp' => [
+    'enabled' => env('CODE_TALKER_MCP_ENABLED', false),
+
+    'web' => [
+        'enabled' => true,
+        'path' => env('CODE_TALKER_MCP_PATH', 'mcp/code-talker'),
+        'middleware' => ['auth:sanctum'],
+    ],
+
+    'local' => [
+        'enabled' => false,
+        'handle' => env('CODE_TALKER_MCP_LOCAL_HANDLE', 'code-talker'),
+    ],
+],
+```
+
+- **web** registers an HTTP MCP endpoint via `Mcp::web()`. Protect it with
+  authentication middleware (Sanctum or OAuth per the laravel/mcp docs). The
+  authenticated user is mapped to a `ToolContext` so user-scoped tools such as
+  `scan-memories` resolve the correct identity. Since there is no conversation in
+  this context, `scan-memories` searches across all of the user's memories rather
+  than a single feature.
+- `scan-memories` implements `shouldRegister()` and is therefore only advertised
+  to callers that have a user identity — anonymous callers never see it. If you
+  expose the server on a public route, give it *optional* authentication
+  middleware (authenticate when a token is present without rejecting guests) so
+  authenticated callers still get the memory tool while anonymous callers get the
+  stateless tools.
+- **local** registers a stdio server via `Mcp::local()`, runnable through the
+  `php artisan mcp:start {handle}` command for local AI assistant integrations.
+
+The server requires laravel/mcp, which is installed as a dependency. See the
+[Laravel MCP documentation](https://laravel.com/docs/mcp) for client
+configuration, authentication, and the MCP Inspector.
+
 ## Memory System
 
 After each completed conversation, `ProcessAiMemoryJob` dispatches and calls `AiMemoryService::processCompletedConversation()`. The service sends the conversation to the same `AiSystem` for analysis and extracts structured memory operations (add / update / remove).
 
 Memories are stored in `AiFeatureMemory` and scoped per user:
+
 - Authenticated users: scoped by `user_id`
 - Anonymous visitors: scoped by `visitor_email` (requires `require_visitor_identity = true`)
 
 ### Memory categories
 
-| Category | Description |
-|----------|-------------|
-| `preference` | How the user likes things done |
-| `domain_knowledge` | Facts about the user not covered by other data |
-| `system_tuning` | What worked well or poorly in this bot's approach |
+| Category           | Description                                       |
+| ------------------ | ------------------------------------------------- |
+| `preference`       | How the user likes things done                    |
+| `domain_knowledge` | Facts about the user not covered by other data    |
+| `system_tuning`    | What worked well or poorly in this bot's approach |
 
 Memories are ranked by `confidence` and `times_reinforced` and injected into the system prompt under `## Learned Insights`. Memories can be reviewed and edited at `/admin/ai/memories`.
 
@@ -327,13 +400,13 @@ already uses.
 
 All admin routes are under `/admin/ai` and require the `can:manage-ai-tools` gate (configurable via `admin_middleware`).
 
-| Prefix | Resource |
-|--------|----------|
-| `/admin/ai/systems` | AI Systems CRUD + interaction log viewer |
-| `/admin/ai/system-prompts` | Reusable system prompt CRUD |
-| `/admin/ai/chat-bots` | Chat bot CRUD |
-| `/admin/ai/conversations` | Conversation viewer + usage backfill trigger |
-| `/admin/ai/memories` | Feature memory CRUD + per-feature rebuild |
+| Prefix                     | Resource                                     |
+| -------------------------- | -------------------------------------------- |
+| `/admin/ai/systems`        | AI Systems CRUD + interaction log viewer     |
+| `/admin/ai/system-prompts` | Reusable system prompt CRUD                  |
+| `/admin/ai/chat-bots`      | Chat bot CRUD                                |
+| `/admin/ai/conversations`  | Conversation viewer + usage backfill trigger |
+| `/admin/ai/memories`       | Feature memory CRUD + per-feature rebuild    |
 
 Define the `manage-ai-tools` gate in your `AppServiceProvider` or `AuthServiceProvider`:
 
@@ -345,10 +418,10 @@ Gate::define('manage-ai-tools', fn ($user) => (bool) $user->is_admin);
 
 The package registers two jobs automatically (requires Laravel's scheduler to be running):
 
-| Job | Schedule | Description |
-|-----|----------|-------------|
-| `ai:sync-conversation-usage` | Twice daily (00:00, 12:00) | Syncs token counts and cost to `AiConversation` |
-| `BackfillConversationUsageJob` | Daily at 02:30 | Backfills usage for conversations missing cost data |
+| Job                            | Schedule                   | Description                                         |
+| ------------------------------ | -------------------------- | --------------------------------------------------- |
+| `ai:sync-conversation-usage`   | Twice daily (00:00, 12:00) | Syncs token counts and cost to `AiConversation`     |
+| `BackfillConversationUsageJob` | Daily at 02:30             | Backfills usage for conversations missing cost data |
 
 Disable automatic scheduling in config and register manually if needed:
 

@@ -3,17 +3,28 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Support\Facades\Http;
-use Jvjvjv\CodeTalker\Models\AiConversation;
+use Jvjvjv\CodeTalker\Services\Mcp\ToolResultConverter;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\SearchWebTool;
+use Jvjvjv\CodeTalker\Support\ToolContext;
 use Jvjvjv\CodeTalker\Tests\TestCase;
+use Laravel\Mcp\Request;
 
 class SearchWebToolTest extends TestCase
 {
+    /**
+     * @param array<string, mixed> $input
+     * @return array<string, mixed>
+     */
+    private function runTool(SearchWebTool $tool, array $input): array
+    {
+        return ToolResultConverter::toArray($tool->handle(new Request($input)));
+    }
+
     public function test_it_requires_query(): void
     {
-        $tool = new SearchWebTool(new AiConversation());
+        $tool = new SearchWebTool(new ToolContext());
 
-        $result = $tool->handle([]);
+        $result = $this->runTool($tool, []);
 
         $this->assertSame('A non-empty query is required.', $result['error']);
     }
@@ -27,9 +38,9 @@ class SearchWebToolTest extends TestCase
             'https://search.brave.com/search*' => Http::response('<html><body><div class="snippet"><a class="heading-serpresult" href="https://brave.example/item">Brave Item</a><div class="snippet-description">Brave description</div></div></body></html>', 200, ['Content-Type' => 'text/html']),
         ]);
 
-        $tool = new SearchWebTool(new AiConversation());
+        $tool = new SearchWebTool(new ToolContext());
 
-        $result = $tool->handle([
+        $result = $this->runTool($tool, [
             'query' => 'laravel package testing',
             'page' => 1,
             'per_engine_limit' => 3,

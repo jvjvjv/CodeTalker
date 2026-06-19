@@ -6,13 +6,16 @@ use Jvjvjv\CodeTalker\Console\Commands\BackfillAiSystemCapabilitiesCommand;
 use Jvjvjv\CodeTalker\Console\Commands\BackfillConversationUsageCommand;
 use Jvjvjv\CodeTalker\Console\Commands\SyncConversationUsageCommand;
 use Jvjvjv\CodeTalker\Jobs\BackfillConversationUsageJob;
+use Jvjvjv\CodeTalker\Mcp\Servers\CodeTalkerServer;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Observers\AiConversationObserver;
 use Jvjvjv\CodeTalker\Services\AiClientFactory;
+use Jvjvjv\CodeTalker\Support\ToolContext;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Mcp\Facades\Mcp;
 
 class CodeTalkerServiceProvider extends ServiceProvider
 {
@@ -31,7 +34,8 @@ class CodeTalkerServiceProvider extends ServiceProvider
     protected static array $toolParameterResolvers = [];
 
     /**
-     * Register a directory containing AiToolHandlerContract implementations.
+     * Register a directory containing laravel/mcp Tool classes (or, for backward
+     * compatibility, legacy AiToolHandlerContract implementations).
      *
      * Call this in your AppServiceProvider::register() or boot() method.
      * Tools in this directory will be auto-discovered alongside the package's own tools.
@@ -94,6 +98,16 @@ class CodeTalkerServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__ . '/../config/code-talker.php', 'code-talker');
 
         $this->app->singleton(AiClientFactory::class);
+
+        // Default ToolContext used when a tool is resolved outside the local chat
+        // loop — primarily the external MCP server, where the authenticated caller
+        // (not a conversation) supplies the user identity. The local loop overrides
+        // this by passing its own ToolContext via makeWith().
+        $this->app->bind(ToolContext::class, static function ($app): ToolContext {
+            $user = $app['auth']->user();
+
+            return ToolContext::forUser($user?->getAuthIdentifier());
+        });
     }
 
     public function boot(): void
@@ -113,6 +127,8 @@ class CodeTalkerServiceProvider extends ServiceProvider
             if (! Route::has('admin.ai.index')) {
                 $this->loadRoutesFrom($this->routeFilePath('codetalker-admin.php'));
             }
+
+            $this->registerMcpServers();
         });
 
         AiConversation::observe(AiConversationObserver::class);
@@ -170,6 +186,29 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 ->dailyAt('02:30')
                 ->name('ai:daily-conversation-usage-backfill')
                 ->withoutOverlapping();
+        }
+    }
+
+    /**
+     * Register the external MCP server (web and/or local transport) when enabled.
+     *
+     * Guarded so it is a no-op unless the host app opts in via config. The web
+     * transport applies the configured auth middleware; the authenticated user
+     * is mapped to a ToolContext by the container binding in register().
+     */
+    protected function registerMcpServers(): void
+    {
+        if (! config('code-talker.mcp.enabled', false)) {
+            return;
+        }
+
+        if (config('code-talker.mcp.web.enabled', true)) {
+            Mcp::web((string) config('code-talker.mcp.web.path', 'mcp/code-talker'), CodeTalkerServer::class)
+                ->middleware((array) config('code-talker.mcp.web.middleware', []));
+        }
+
+        if (config('code-talker.mcp.local.enabled', false)) {
+            Mcp::local((string) config('code-talker.mcp.local.handle', 'code-talker'), CodeTalkerServer::class);
         }
     }
 

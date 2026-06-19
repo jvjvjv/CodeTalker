@@ -3,15 +3,24 @@
 namespace Jvjvjv\CodeTalker\Contracts\Mcp;
 
 /**
- * Contract for AI chat bot MCP tool handlers.
+ * Contract for AI chat bot tool handlers.
  *
- * Implement this interface to create a custom tool that the AI model
- * can invoke during a conversation. Tools are auto-discovered from
- * registered tool directories (package and host app).
+ * @deprecated Tools should now extend {@see \Laravel\Mcp\Server\Tool} so the
+ * same class runs in the local chat loop and can be exposed to external MCP
+ * clients. This interface is still discovered and dispatched for backward
+ * compatibility, but will be removed in a future major release. Migrate by:
+ *   - extending \Laravel\Mcp\Server\Tool and adding a #[Description] (and
+ *     optionally #[Name]) attribute instead of the name()/description() methods;
+ *   - defining schema(\Illuminate\Contracts\JsonSchema\JsonSchema $schema): array
+ *     with the fluent builder instead of returning a raw array;
+ *   - implementing handle(\Laravel\Mcp\Request $request): \Laravel\Mcp\Response
+ *     and returning Response::structured([...]) / Response::error('...');
+ *   - depending on {@see \Jvjvjv\CodeTalker\Support\ToolContext} for the user /
+ *     conversation instead of injecting AiConversation directly.
  *
- * == Tool Discovery ==
- * Tools are discovered automatically. Register additional host-app directories
- * via CodeTalkerServiceProvider::addToolDirectory() in your AppServiceProvider.
+ * Tools are auto-discovered from registered tool directories (package and host
+ * app). Register additional host-app directories via
+ * CodeTalkerServiceProvider::addToolDirectory() in your AppServiceProvider.
  *
  * == Schema Format ==
  * The schema() method must return a JSON Schema (draft 2020-12) input_schema:
