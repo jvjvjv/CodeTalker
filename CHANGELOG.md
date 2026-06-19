@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.0] — 2026-06-19
+
+This release re-platforms chatbot tools onto [laravel/mcp](https://github.com/laravel/mcp) so a single tool class runs in the local chat loop and can also be exposed to external MCP clients (Claude Desktop, Grok, etc.).
+
+### Breaking Changes
+- Tools are now [laravel/mcp](https://github.com/laravel/mcp) `Laravel\Mcp\Server\Tool` classes (`#[Description]`/`#[Name]` attributes, `schema(JsonSchema)`, `handle(Request): Response`); the `AiToolHandlerContract` interface is deprecated but still discovered and dispatched for one release to ease migration.
+- Tools should depend on the new `Jvjvjv\CodeTalker\Support\ToolContext` for the current user/conversation instead of injecting `AiConversation` directly.
+- The built-in tools were renamed from snake_case to kebab-case (`fetch_web_page` → `fetch-web-page`, `search_web` → `search-web`, `scan_memories` → `scan-memories`); run the published migration to remap persisted `AiSystem::allowed_tools` values.
+- Added `laravel/mcp` as a dependency.
+
+### New Features
+- The built-in chatbot tools can now be exposed to external MCP clients through the bundled `CodeTalkerServer`, configurable (and disabled by default) under the new `code-talker.mcp` config key with web (HTTP, authenticated) and local (stdio) transports.
+- The `scan-memories` tool is advertised by the external MCP server only to callers with a user identity (via `shouldRegister()`), so anonymous callers never see it.
+
 ## [0.4.1] — 2026-06-18
 
 This patch release fixes PHP 8.2 and 8.3 compatibility for the `symfony/dom-crawler` dependency added in 0.4.0.
