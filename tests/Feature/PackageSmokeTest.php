@@ -6,7 +6,7 @@ use Inertia\Inertia;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Jvjvjv\CodeTalker\Http\Controllers\Admin\AiToolsController;
-use Jvjvjv\CodeTalker\Services\AiClientFactory;
+use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
 use Jvjvjv\CodeTalker\Tests\TestCase;
 
 class PackageSmokeTest extends TestCase
@@ -18,12 +18,12 @@ class PackageSmokeTest extends TestCase
         $this->assertTrue(Route::has('admin.ai.systems.index'));
     }
 
-    public function test_it_registers_the_ai_client_factory_singleton(): void
+    public function test_it_registers_the_agent_factory_singleton(): void
     {
-        $first = $this->app->make(AiClientFactory::class);
-        $second = $this->app->make(AiClientFactory::class);
+        $first = $this->app->make(AgentFactory::class);
+        $second = $this->app->make(AgentFactory::class);
 
-        $this->assertInstanceOf(AiClientFactory::class, $first);
+        $this->assertInstanceOf(AgentFactory::class, $first);
         $this->assertSame($first, $second);
     }
 

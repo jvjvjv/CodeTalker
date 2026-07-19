@@ -94,9 +94,9 @@ class AiSystemCapabilityService
      */
     private function resolveLmStudioCapabilities(string $model, ?string $baseUrl = null): ?array
     {
-        $service = new LmStudioService(serverUrl: $baseUrl);
+        $client = new LmStudioServerClient($baseUrl);
 
-        $matchingModel = collect($service->listModels())
+        $matchingModel = collect($client->listModels())
             ->first(static fn (array $listedModel): bool => ($listedModel['id'] ?? null) === $model);
 
         if (!is_array($matchingModel)) {

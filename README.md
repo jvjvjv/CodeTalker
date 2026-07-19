@@ -4,8 +4,14 @@ Multi-provider AI communications package for Laravel — chatbots, streaming, to
 
 ## Requirements
 
-- PHP ^8.2
-- Laravel ^12.0 || ^13.0
+- PHP ^8.3
+- Laravel ^12.62 || ^13.15
+
+Provider communication runs on Laravel's first-party [laravel/ai](https://laravel.com/docs/13.x/ai-sdk)
+SDK, installed as a dependency. You do **not** need to publish or configure
+`config/ai.php` — provider credentials come from `AiSystem` database records and
+are bridged into laravel/ai providers at runtime. (Publish it only if your app
+uses laravel/ai on its own.)
 
 ## Installation
 
@@ -31,6 +37,26 @@ publish them too:
 php artisan vendor:publish --tag=code-talker-routes
 ```
 
+## Upgrading
+
+After upgrading the package, **re-publish or reconcile your published config**:
+
+```bash
+php artisan vendor:publish --tag=code-talker-config --force
+```
+
+This matters because the package merges its config **shallowly** (Laravel's
+`mergeConfigFrom`). If your app already has a published `config/code-talker.php`
+with a `providers` key, newer or corrected **nested** keys the package ships —
+most notably `providers.*.base_url` and the `raw_exchanges` block — are **not**
+backfilled into it. Your previously published array is used as-is, so a stale
+publish can silently keep an outdated provider base URL (see
+[Troubleshooting](#troubleshooting)).
+
+After `--force`, re-apply any local customizations. If you'd rather not
+overwrite, diff your file against `vendor/jvjvjv/code-talker/config/code-talker.php`
+and copy over only the new keys.
+
 ## Configuration
 
 `config/code-talker.php` controls package-wide behavior:
@@ -49,50 +75,71 @@ php artisan vendor:publish --tag=code-talker-routes
 
 ### Provider environment variables
 
-**Anthropic**
+API keys, models, and token limits live on `AiSystem` database records — not in
+env vars. The env vars below only supply fallback base URLs (used when an
+`AiSystem` has no `base_url`), the Anthropic API version, and the LM Studio
+server URL:
 
 ```
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-sonnet-4-6
-ANTHROPIC_MAX_TOKENS=1024
 ANTHROPIC_API_VERSION=2023-06-01
 ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
-```
-
-**OpenAI**
-
-```
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
-OPENAI_MAX_TOKENS=1024
 OPENAI_BASE_URL=https://api.openai.com/v1
-```
-
-**Google Gemini**
-
-```
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
-GEMINI_MAX_TOKENS=1024
-```
-
-**xAI Grok**
-
-```
-GROK_MODEL=grok-3-mini
-GROK_MAX_TOKENS=1024
+GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 GROK_BASE_URL=https://api.x.ai/v1
-```
-
-**LM Studio**
-
-```
 LMSTUDIO_SERVER_URL=http://localhost:1234
-LMSTUDIO_MODEL=
-LMSTUDIO_MAX_TOKENS=1024
 ```
 
-> Config values are fallback defaults. `AiSystem` database records override them at runtime.
+The `providers.*.pricing` config keys feed conversation usage/cost tracking.
+
+**Base URLs must include the API version path segment** — `/v1` for
+`anthropic`, `openai`, and `grok`; `/v1beta` for `gemini` (the defaults above
+already do). Provider communication treats the configured URL as the complete
+base and appends the endpoint directly. This differs from the retired
+`anthropic-ai/sdk`, which accepted a bare host (`https://api.anthropic.com`) and
+appended `/v1` itself — so a bare host now produces 404s. This applies both to a
+live `AiSystem.base_url` value and to these `providers.*.base_url` fallbacks. See
+[Troubleshooting](#troubleshooting).
+
+### Raw Provider Exchange Logging
+
+Every laravel/ai HTTP request/response can be captured verbatim into the
+`ai_provider_exchanges` table for debugging and auditing.
+
+```php
+'raw_exchanges' => [
+    'enabled' => env('CODE_TALKER_RAW_EXCHANGES_ENABLED', true),
+    'providers' => env('CODE_TALKER_RAW_EXCHANGES_PROVIDERS', 'lm-studio'),
+    'retention_days' => (int) env('CODE_TALKER_RAW_EXCHANGES_RETENTION_DAYS', 14),
+],
+```
+
+- `enabled` — master switch for capture.
+- `providers` — comma-separated allow-list of `AiSystem` provider values
+  (`lm-studio`, `anthropic`, `openai`, `openai-compatible`, `gemini`, `grok`),
+  or `all` to capture every provider. Defaults to `lm-studio`.
+- `retention_days` — rows older than this are removed by
+  `php artisan ai:prune-provider-exchanges`, scheduled daily at 03:00 (respects
+  the `schedule` flag).
+
+Request bodies and response bytes are stored, but request **headers are never
+recorded**, so provider API keys are not persisted.
+
+### Troubleshooting
+
+**`Provider is unavailable: HTTP request returned status code 404`** — returned
+by the model-status / readiness check (and cloud-provider chat also 404s) for
+`anthropic`, `openai`, `gemini`, or `grok`.
+
+- **Cause:** the provider base URL is missing its version segment — e.g.
+  `https://api.anthropic.com` instead of `https://api.anthropic.com/v1`. This is
+  usually a **stale published config** (the shallow merge described in
+  [Upgrading](#upgrading) never backfilled the corrected default) or an old
+  `AiSystem.base_url` / `ANTHROPIC_BASE_URL` value carried over from the
+  `anthropic-ai/sdk` era.
+- **Fix:** set the `AiSystem.base_url` to include `/v1` (or clear it to fall back
+  to the config default), fix any bare-host `*_BASE_URL` env var, and re-publish
+  the config with `--force` (see [Upgrading](#upgrading)). The correct URL forms
+  are listed under [Provider environment variables](#provider-environment-variables).
 
 ## AI Systems
 
@@ -111,30 +158,38 @@ An `AiSystem` record represents a fully configured provider endpoint. Create one
 | `system_prompt_id` | Optional FK to an `AiSystemPrompt` record                                         |
 | `is_active`        | Inactive systems are rejected by the factory                                      |
 
-### Getting a client in code
+### Getting an agent in code
+
+`AgentFactory` bridges an `AiSystem` record into a configured
+[laravel/ai](https://laravel.com/docs/13.x/ai-sdk) agent:
 
 ```php
-use Jvjvjv\CodeTalker\Services\AiClientFactory;
+use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 
 // From a specific system record
-$client = app(AiClientFactory::class)->forSystem(AiSystem::find($id));
+$agent = app(AgentFactory::class)->forSystem(
+    AiSystem::find($id),
+    instructions: 'You are a helpful assistant.',
+    maxTokens: 2048,
+    temperature: 0.7,
+);
 
 // From a feature key (resolves the default system for that feature)
-$client = app(AiClientFactory::class)->forFeature('my-feature');
+$agent = app(AgentFactory::class)->forFeature('my-feature');
+
+$response = $agent->prompt('Hello!');   // Laravel\Ai\Responses\AgentResponse
+echo $response->text;
+
+foreach ($agent->stream('Hello!') as $event) {
+    // Laravel\Ai\Streaming\Events\* (TextDelta, ToolCall, StreamEnd, ...)
+}
 ```
 
-Both return an `AiClientContract` instance with a fluent builder:
-
-```php
-$response = $client
-    ->withSystem('You are a helpful assistant.')
-    ->withMaxTokens(2048)
-    ->withTemperature(0.7)
-    ->message([
-        ['role' => 'user', 'content' => 'Hello!'],
-    ]);
-```
+The agent runs on laravel/ai, so everything from the
+[laravel/ai documentation](https://laravel.com/docs/13.x/ai-sdk) — streaming,
+tool use, structured output — applies. Prior versions returned an
+`AiClientContract` from `AiClientFactory`; both were removed in 0.6.0.
 
 ### Feature defaults
 
@@ -351,7 +406,7 @@ external MCP clients (Claude Desktop, Grok, etc.) through a bundled
   than a single feature.
 - `scan-memories` implements `shouldRegister()` and is therefore only advertised
   to callers that have a user identity — anonymous callers never see it. If you
-  expose the server on a public route, give it *optional* authentication
+  expose the server on a public route, give it _optional_ authentication
   middleware (authenticate when a token is present without rejecting guests) so
   authenticated callers still get the memory tool while anonymous callers get the
   stateless tools.

@@ -11,12 +11,8 @@ use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiSystemFeatureDefault;
 use Jvjvjv\CodeTalker\Models\AiSystemPrompt;
 use Jvjvjv\CodeTalker\Services\AiModelReadinessService;
-use Jvjvjv\CodeTalker\Services\ClaudeService;
-use Jvjvjv\CodeTalker\Services\GeminiService;
-use Jvjvjv\CodeTalker\Services\GrokService;
 use Jvjvjv\CodeTalker\Services\AiSystemCapabilityService;
-use Jvjvjv\CodeTalker\Services\LmStudioService;
-use Jvjvjv\CodeTalker\Services\OpenAiService;
+use Jvjvjv\CodeTalker\Services\ProviderModelsClient;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,6 +25,7 @@ class AiSystemController extends Controller
     public function __construct(
         private AiSystemCapabilityService $aiSystemCapabilityService,
         private AiModelReadinessService $aiModelReadinessService,
+        private ProviderModelsClient $providerModelsClient,
     ) {
     }
 
@@ -202,29 +199,11 @@ class AiSystemController extends Controller
                 return response()->json(['models' => [], 'error' => 'API key is required for this provider.'], 422);
             }
 
-            $client = match ($provider) {
-                AiProvider::Anthropic => new ClaudeService(
-                    apiKey: (string) ($request->input('api_key') ?? ''),
-                    baseUrl: $request->string('base_url')->toString() ?: null,
-                ),
-                AiProvider::OpenAI, AiProvider::OpenAICompatible => new OpenAiService(
-                    apiKey: (string) ($request->input('api_key') ?? ''),
-                    baseUrl: $request->string('base_url')->toString() ?: null,
-                ),
-                AiProvider::LmStudio => new LmStudioService(
-                    serverUrl: $request->string('base_url')->toString() ?: null,
-                ),
-                AiProvider::Gemini => new GeminiService(
-                    apiKey: (string) ($request->input('api_key') ?? ''),
-                    baseUrl: $request->string('base_url')->toString() ?: null,
-                ),
-                AiProvider::Grok => new GrokService(
-                    apiKey: (string) ($request->input('api_key') ?? ''),
-                    baseUrl: $request->string('base_url')->toString() ?: null,
-                ),
-            };
-
-            $models = $client->listModels();
+            $models = $this->providerModelsClient->listModels(
+                $provider,
+                $request->input('api_key') !== null ? (string) $request->input('api_key') : null,
+                $request->string('base_url')->toString() ?: null,
+            );
 
             $formatted = collect($models)->map(fn(array $m) => [
                 'id' => $m['id'],

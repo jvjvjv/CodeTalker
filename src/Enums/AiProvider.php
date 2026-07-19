@@ -23,4 +23,18 @@ enum AiProvider: string
     {
         return $this !== self::OpenAICompatible && $this !== self::LmStudio;
     }
+
+    /**
+     * The laravel/ai driver that serves this provider.
+     */
+    public function toLaravelAiDriver(): string
+    {
+        return match ($this) {
+            self::Anthropic => 'anthropic',
+            self::OpenAI => 'openai',
+            self::OpenAICompatible, self::LmStudio => 'openai-compatible',
+            self::Gemini => 'gemini',
+            self::Grok => 'xai',
+        };
+    }
 }

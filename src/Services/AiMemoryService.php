@@ -5,13 +5,18 @@ namespace Jvjvjv\CodeTalker\Services;
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiFeatureMemory;
+use Jvjvjv\CodeTalker\Services\LaravelAi\AiSystemProviderConfigurator;
+use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeFrame;
+use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class AiMemoryService
 {
     public function __construct(
-        private AiClientFactory $clientFactory,
+        private LaravelAi\AgentFactory $agentFactory,
+        private RawExchangeRecorder $rawExchanges,
+        private AiSystemProviderConfigurator $providerConfigurator,
     ) {
     }
 
@@ -101,17 +106,19 @@ class AiMemoryService
 
         $analysisPrompt = $this->buildAnalysisPrompt($existingMemories, $conversationMessages);
 
-        $client = $this->clientFactory->forSystem($conversation->aiSystem);
+        $agent = $this->agentFactory->forSystem(
+            $conversation->aiSystem,
+            instructions: 'You are a memory management system. You analyze AI conversations and extract reusable insights. Always respond with valid JSON only, no markdown fences or extra text.',
+            maxTokens: 4096,
+            temperature: 0.2,
+        );
 
-        $response = $client
-            ->withSystem('You are a memory management system. You analyze AI conversations and extract reusable insights. Always respond with valid JSON only, no markdown fences or extra text.')
-            ->withMaxTokens(4096)
-            ->withTemperature(0.2)
-            ->message([
-                ['role' => 'user', 'content' => $analysisPrompt],
-            ]);
+        $response = $this->rawExchanges->capture(
+            RawExchangeFrame::forSystem($conversation->aiSystem, $this->providerConfigurator),
+            fn () => $agent->prompt($analysisPrompt),
+        );
 
-        return $this->parseAnalysisResponse($response);
+        return $this->parseAnalysisResponse((string) $response->text);
     }
 
     /**
@@ -287,16 +294,8 @@ PROMPT;
      *
      * @return array{add: array<int, mixed>, update: array<int, mixed>, remove: array<int, mixed>}
      */
-    private function parseAnalysisResponse(array $response): array
+    private function parseAnalysisResponse(string $text): array
     {
-        $text = '';
-
-        foreach ($response['content'] ?? [] as $block) {
-            if (($block['type'] ?? '') === 'text') {
-                $text .= $block['text'];
-            }
-        }
-
         $text = trim($text);
 
         if (preg_match('/```(?:json)?\s*(.*?)\s*```/s', $text, $matches)) {

@@ -21,11 +21,9 @@
     }
   ],
   "require": {
-    "php": "^8.2",
-    "laravel/framework": "^12.0 || ^13.0",
-    "anthropic-ai/sdk": "^0.25.0",
-    "openai-php/client": "^0.19.2",
-    "google-gemini-php/client": "^2.7",
+    "php": "^8.3",
+    "laravel/framework": "^12.62 || ^13.15",
+    "laravel/ai": "^0.9",
     "guzzlehttp/guzzle": "^7.0",
     "inertiajs/inertia-laravel": "^2.0 || ^3.0",
     "symfony/dom-crawler": "^7.4 || ^8.1",
@@ -70,10 +68,5 @@
     }
   },
   "minimum-stability": "stable",
-  "prefer-stable": true,
-  "config": {
-    "allow-plugins": {
-      "php-http/discovery": true
-    }
-  }
+  "prefer-stable": true
 }

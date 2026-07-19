@@ -4,12 +4,17 @@ namespace Jvjvjv\CodeTalker;
 
 use Jvjvjv\CodeTalker\Console\Commands\BackfillAiSystemCapabilitiesCommand;
 use Jvjvjv\CodeTalker\Console\Commands\BackfillConversationUsageCommand;
+use Jvjvjv\CodeTalker\Console\Commands\PruneProviderExchangesCommand;
 use Jvjvjv\CodeTalker\Console\Commands\SyncConversationUsageCommand;
 use Jvjvjv\CodeTalker\Jobs\BackfillConversationUsageJob;
 use Jvjvjv\CodeTalker\Mcp\Servers\CodeTalkerServer;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Observers\AiConversationObserver;
-use Jvjvjv\CodeTalker\Services\AiClientFactory;
+use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
+use Jvjvjv\CodeTalker\Services\LaravelAi\AiSystemProviderConfigurator;
+use Jvjvjv\CodeTalker\Services\ProviderModelsClient;
+use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeContext;
+use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeRecorder;
 use Jvjvjv\CodeTalker\Support\ToolContext;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Route;
@@ -97,7 +102,11 @@ class CodeTalkerServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/code-talker.php', 'code-talker');
 
-        $this->app->singleton(AiClientFactory::class);
+        $this->app->singleton(AiSystemProviderConfigurator::class);
+        $this->app->singleton(AgentFactory::class);
+        $this->app->singleton(ProviderModelsClient::class);
+        $this->app->singleton(RawExchangeContext::class);
+        $this->app->singleton(RawExchangeRecorder::class);
 
         // Default ToolContext used when a tool is resolved outside the local chat
         // loop — primarily the external MCP server, where the authenticated caller
@@ -113,6 +122,8 @@ class CodeTalkerServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+
+        $this->app->make(RawExchangeRecorder::class)->register();
 
         // Defer route registration until after all service providers (including the host
         // app's RouteServiceProvider) have booted. This ensures specific literal routes
@@ -174,6 +185,7 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 BackfillAiSystemCapabilitiesCommand::class,
                 BackfillConversationUsageCommand::class,
                 SyncConversationUsageCommand::class,
+                PruneProviderExchangesCommand::class,
             ]);
         }
 
@@ -185,6 +197,10 @@ class CodeTalkerServiceProvider extends ServiceProvider
             Schedule::job(new BackfillConversationUsageJob(false, 500))
                 ->dailyAt('02:30')
                 ->name('ai:daily-conversation-usage-backfill')
+                ->withoutOverlapping();
+
+            Schedule::command('ai:prune-provider-exchanges')
+                ->dailyAt('03:00')
                 ->withoutOverlapping();
         }
     }

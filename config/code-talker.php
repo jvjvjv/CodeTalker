@@ -90,18 +90,17 @@ return [
     | AI Providers
     |--------------------------------------------------------------------------
     |
-    | Default configuration for each AI provider. The AiSystem database records
-    | override these at runtime — these are the fallback defaults used when
-    | services are instantiated without explicit parameters.
+    | Default configuration for each AI provider. AiSystem database records
+    | hold the credentials and model settings used at runtime (bridged into
+    | laravel/ai providers); these entries supply fallback base URLs, the
+    | Anthropic API version, the LM Studio server URL, and token pricing used
+    | by conversation usage tracking.
     |
     */
 
     'providers' => [
 
         'anthropic' => [
-            'api_key' => env('ANTHROPIC_API_KEY'),
-            'model' => env('ANTHROPIC_MODEL', 'claude-sonnet-4-6'),
-            'max_tokens' => (int) env('ANTHROPIC_MAX_TOKENS', 1024),
             'api_version' => env('ANTHROPIC_API_VERSION', '2023-06-01'),
             'base_url' => env('ANTHROPIC_BASE_URL', 'https://api.anthropic.com/v1'),
             'pricing' => [
@@ -151,9 +150,6 @@ return [
         ],
 
         'openai' => [
-            'api_key' => env('OPENAI_API_KEY'),
-            'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
-            'max_tokens' => (int) env('OPENAI_MAX_TOKENS', 1024),
             'base_url' => env('OPENAI_BASE_URL', 'https://api.openai.com/v1'),
             'pricing' => [
                 'default' => [
@@ -182,24 +178,36 @@ return [
         ],
 
         'gemini' => [
-            'api_key' => env('GEMINI_API_KEY'),
-            'model' => env('GEMINI_MODEL', 'gemini-2.5-flash'),
-            'max_tokens' => (int) env('GEMINI_MAX_TOKENS', 1024),
             'base_url' => env('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta'),
         ],
 
         'grok' => [
-            'model' => env('GROK_MODEL', 'grok-3-mini'),
-            'max_tokens' => (int) env('GROK_MAX_TOKENS', 1024),
             'base_url' => env('GROK_BASE_URL', 'https://api.x.ai/v1'),
         ],
 
         'lm-studio' => [
             'server_url' => env('LMSTUDIO_SERVER_URL', 'http://localhost:1234'),
-            'model' => env('LMSTUDIO_MODEL', ''),
-            'max_tokens' => (int) env('LMSTUDIO_MAX_TOKENS', 1024),
         ],
 
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Raw Provider Exchange Logging
+    |--------------------------------------------------------------------------
+    |
+    | Captures the verbatim request and response bytes of every laravel/ai
+    | HTTP call into the ai_provider_exchanges table. `providers` is a comma-
+    | separated allow-list of AiSystem provider values (or "all"); only those
+    | providers are captured. Rows older than `retention_days` are removed by
+    | the ai:prune-provider-exchanges command (scheduled daily).
+    |
+    */
+
+    'raw_exchanges' => [
+        'enabled' => env('CODE_TALKER_RAW_EXCHANGES_ENABLED', true),
+        'providers' => env('CODE_TALKER_RAW_EXCHANGES_PROVIDERS', 'lm-studio'),
+        'retention_days' => (int) env('CODE_TALKER_RAW_EXCHANGES_RETENTION_DAYS', 14),
     ],
 
 ];

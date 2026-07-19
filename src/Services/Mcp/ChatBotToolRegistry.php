@@ -7,6 +7,7 @@ use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolHandlerContract;
 use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolRegistryContract;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Services\AiMemoryService;
+use Jvjvjv\CodeTalker\Services\LaravelAi\BridgedTool;
 use Jvjvjv\CodeTalker\Support\ToolContext;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Server\Tool;
@@ -104,6 +105,25 @@ class ChatBotToolRegistry implements AiToolRegistryContract
             },
             $this->handlers,
         ));
+    }
+
+    /**
+     * The registered tools adapted to laravel/ai's Tool contract, for use in
+     * a laravel/ai agent's tools() list.
+     *
+     * @return array<int, BridgedTool>
+     */
+    public function toLaravelAiTools(): array
+    {
+        return array_map(
+            fn (array $tool): BridgedTool => new BridgedTool(
+                $tool['name'],
+                $tool['description'],
+                (array) $tool['input_schema'],
+                $this,
+            ),
+            $this->toApiTools(),
+        );
     }
 
     /**

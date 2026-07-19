@@ -2,16 +2,17 @@
 
 namespace Jvjvjv\CodeTalker\Services;
 
-use Jvjvjv\CodeTalker\Contracts\CanLoadModels;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Models\AiChatBot;
 use Jvjvjv\CodeTalker\Models\AiSystem;
+use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
 use Throwable;
 
 class AiModelReadinessService
 {
     public function __construct(
-        private AiClientFactory $clientFactory,
+        private AgentFactory $agentFactory,
+        private ProviderModelsClient $modelsClient,
     ) {
     }
 
@@ -31,10 +32,8 @@ class AiModelReadinessService
         }
 
         try {
-            $client = $this->clientFactory->forSystem($system);
-
-            if ($client instanceof CanLoadModels) {
-                $isLoaded = $client->isModelLoaded(trim((string) $system->model));
+            if ($provider === AiProvider::LmStudio) {
+                $isLoaded = $this->lmStudioClient($system)->isModelLoaded(trim((string) $system->model));
 
                 return $this->statusPayload(
                     state: $isLoaded ? 'loaded' : 'not_loaded',
@@ -43,7 +42,7 @@ class AiModelReadinessService
                 );
             }
 
-            $models = $client->listModels();
+            $models = $this->modelsClient->listModelsForSystem($system);
             $configuredModel = trim((string) $system->model);
 
             $hasModel = collect($models)->contains(
@@ -86,57 +85,17 @@ class AiModelReadinessService
     public function warmUpSystem(AiSystem $system): array
     {
         $initialStatus = $this->statusForSystem($system);
-        $provider = AiProvider::tryFrom($system->provider);
 
         if ($initialStatus['state'] === 'loaded') {
             return $initialStatus + ['warmup_attempted' => false];
         }
 
-        $client = $this->clientFactory->forSystem($system);
-
-        if ($client instanceof CanLoadModels) {
-            try {
-                $client->loadModel(trim((string) $system->model), $system->context_length);
-
-                // LM Studio may take a short moment to reflect the loaded instance.
-                for ($attempt = 0; $attempt < 5; $attempt++) {
-                    $status = $this->statusForSystem($system);
-                    if ($status['state'] === 'loaded') {
-                        return $status + ['warmup_attempted' => true];
-                    }
-
-                    usleep(200000);
-                }
-
-                return $this->statusForSystem($system) + ['warmup_attempted' => true];
-            } catch (Throwable $exception) {
-                return $this->statusPayload(
-                    state: 'unavailable',
-                    system: $system,
-                    message: 'Model load failed: ' . $exception->getMessage(),
-                ) + ['warmup_attempted' => true];
-            }
-        }
-
-        if ($provider !== AiProvider::OpenAICompatible) {
-            return $initialStatus + ['warmup_attempted' => false];
-        }
-
-        try {
-            $this->clientFactory->forSystem($system)
-                ->withMaxTokens(16)
-                ->message([
-                    ['role' => 'user', 'content' => 'Reply with OK.'],
-                ]);
-
-            return $this->statusForSystem($system) + ['warmup_attempted' => true];
-        } catch (Throwable $exception) {
-            return $this->statusPayload(
-                state: 'unavailable',
-                system: $system,
-                message: 'Warmup failed: ' . $exception->getMessage(),
-            ) + ['warmup_attempted' => true];
-        }
+        return $this->attemptWarmUp(
+            $system,
+            $system->context_length,
+            fn (): array => $this->statusForSystem($system),
+            $initialStatus,
+        );
     }
 
     /**
@@ -157,23 +116,38 @@ class AiModelReadinessService
         $bot->loadMissing('aiSystem');
 
         $initialStatus = $this->statusForChatBot($bot);
-        $provider = AiProvider::tryFrom($bot->aiSystem->provider);
 
         if ($initialStatus['state'] === 'loaded') {
             return $initialStatus + ['warmup_attempted' => false];
         }
 
-        $client = $this->clientFactory->forSystem($bot->aiSystem);
+        return $this->attemptWarmUp(
+            $bot->aiSystem,
+            $bot->resolvedContextLength(),
+            fn (): array => $this->statusForChatBot($bot),
+            $initialStatus,
+        );
+    }
 
-        if ($client instanceof CanLoadModels) {
+    /**
+     * LM Studio models are loaded explicitly via the native API; other
+     * OpenAI-compatible endpoints are warmed with a minimal completion.
+     *
+     * @param callable(): array $statusCheck
+     * @param array{state: string, provider: string, model: string, message: string, checked_at: string} $initialStatus
+     * @return array{state: string, provider: string, model: string, message: string, checked_at: string, warmup_attempted: bool}
+     */
+    private function attemptWarmUp(AiSystem $system, ?int $contextLength, callable $statusCheck, array $initialStatus): array
+    {
+        $provider = AiProvider::tryFrom($system->provider);
+
+        if ($provider === AiProvider::LmStudio) {
             try {
-                $client->loadModel(
-                    trim((string) $bot->aiSystem->model),
-                    $bot->resolvedContextLength(),
-                );
+                $this->lmStudioClient($system)->loadModel(trim((string) $system->model), $contextLength);
 
+                // LM Studio may take a short moment to reflect the loaded instance.
                 for ($attempt = 0; $attempt < 5; $attempt++) {
-                    $status = $this->statusForChatBot($bot);
+                    $status = $statusCheck();
                     if ($status['state'] === 'loaded') {
                         return $status + ['warmup_attempted' => true];
                     }
@@ -181,11 +155,11 @@ class AiModelReadinessService
                     usleep(200000);
                 }
 
-                return $this->statusForChatBot($bot) + ['warmup_attempted' => true];
+                return $statusCheck() + ['warmup_attempted' => true];
             } catch (Throwable $exception) {
                 return $this->statusPayload(
                     state: 'unavailable',
-                    system: $bot->aiSystem,
+                    system: $system,
                     message: 'Model load failed: ' . $exception->getMessage(),
                 ) + ['warmup_attempted' => true];
             }
@@ -196,20 +170,23 @@ class AiModelReadinessService
         }
 
         try {
-            $this->clientFactory->forSystem($bot->aiSystem)
-                ->withMaxTokens(16)
-                ->message([
-                    ['role' => 'user', 'content' => 'Reply with OK.'],
-                ]);
+            $this->agentFactory
+                ->forSystem($system, maxTokens: 16)
+                ->prompt('Reply with OK.');
 
-            return $this->statusForChatBot($bot) + ['warmup_attempted' => true];
+            return $statusCheck() + ['warmup_attempted' => true];
         } catch (Throwable $exception) {
             return $this->statusPayload(
                 state: 'unavailable',
-                system: $bot->aiSystem,
+                system: $system,
                 message: 'Warmup failed: ' . $exception->getMessage(),
             ) + ['warmup_attempted' => true];
         }
+    }
+
+    private function lmStudioClient(AiSystem $system): LmStudioServerClient
+    {
+        return new LmStudioServerClient($system->base_url, $system->api_key);
     }
 
     /**
@@ -226,4 +203,3 @@ class AiModelReadinessService
         ];
     }
 }
-

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.0] — 2026-07-19
+
+This release re-platforms the entire provider layer onto Laravel's first-party [laravel/ai](https://github.com/laravel/ai) SDK, deleting the five hand-rolled provider services and three vendor SDK dependencies while keeping the browser SSE wire format, database schema, routes, tool contracts, memory system, and admin endpoints unchanged.
+
+### Breaking Changes
+- Requires PHP `^8.3` (was `^8.2`) and Laravel `^12.62 || ^13.15`, driven by the new `laravel/ai` dependency.
+- Removed `AiClientContract`, `CanLoadModels`, `AiClientFactory`, the `ExecutesAiTools` concern, and the five provider services (`ClaudeService`, `OpenAiService`, `GeminiService`, `GrokService`, `LmStudioService`); host code using them should migrate to `AgentFactory::forSystem()` / `forFeature()` (returns a laravel/ai agent) or use laravel/ai directly.
+- Removed the `anthropic-ai/sdk`, `openai-php/client`, and `google-gemini-php/client` dependencies in favor of `laravel/ai`.
+- Removed the unused `providers.*.api_key`, `providers.*.model`, and `providers.*.max_tokens` config fallbacks from `code-talker.php`; credentials and model settings come exclusively from `AiSystem` records (the `pricing`, `base_url`, `api_version`, and `server_url` keys remain).
+- `AiLlmMessage` logging granularity changed: tool-use iterations are no longer separate request/response rows — each agent invocation logs one request and one response row whose `response_data.events` list now includes tool calls and tool results; `N.M` sub-turn numbering is only used for max-token continuations.
+
+### New Features
+- Chat streaming, the agentic tool loop, and provider normalization now run on the official laravel/ai SDK; `AiSystem` records are bridged to laravel/ai providers at runtime, so hosts do not need to publish or configure `config/ai.php`.
+- Enabling `enable_thinking` on an Anthropic `AiSystem` now requests extended thinking (streamed to the browser as reasoning deltas).
+- The `grok` provider now targets laravel/ai's `xai` driver, and `lm-studio` / `openai-compatible` systems run on the `openai-compatible` driver with per-system base URLs.
+
+### Known Issues
+- Whether LM Studio `reasoning_content` deltas surface as reasoning events depends on laravel/ai's `openai-compatible` driver; if unsupported, reasoning display for LM Studio degrades silently while text streaming is unaffected.
+
 ## [0.5.0] — 2026-06-19
 
 This release re-platforms chatbot tools onto [laravel/mcp](https://github.com/laravel/mcp) so a single tool class runs in the local chat loop and can also be exposed to external MCP clients (Claude Desktop, Grok, etc.).
