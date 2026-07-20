@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.1] — 2026-07-20
+
+Fixes unbounded chat-cookie growth that could push the request `Cookie` header past the web server's limit and produce a `400 Request Header Or Cookie Too Large`.
+
+### Bug Fixes
+- The chatbot no longer writes a separate `ai_chat_bot_conversations_{botId}` cookie per bot with an ever-growing conversation `history` array. Visitors who used several bots accumulated many large encrypted cookies (all at path `/`, sent on every request), eventually exceeding the server header limit. Conversation state is now kept in a single small `ai_chat_bot_current` cookie holding only the visitor's most recent conversation id.
+- Legacy `ai_chat_bot_conversations_*` cookies are now actively forgotten whenever a chat route is visited, so existing bloated browsers recover on their own (once the request can reach the app).
+
+### Behavior Changes
+- Per-bot conversation history now lives only in the server-side session, so the conversation switcher persists within a session but is not restored across sessions for anonymous visitors; the single cookie still resumes their latest chat. History is also capped defensively (25 entries) in the session.
+
+### Upgrade Note
+- Because the old cookies bloat the request header, the web server rejects the request *before* the app runs — so the app cannot clear them until the request gets through. Ensure the origin header buffer is large enough (e.g. nginx `large_client_header_buffers 8 32k;`) so already-affected browsers can reach the app and have their legacy cookies forgotten.
+
 ## [0.7.0] — 2026-07-20
 
 Memory extraction now runs once per conversation instead of once per assistant message, triggered by a new idle-completion command, and the admin memory rebuild no longer destroys the memories it cannot rebuild.

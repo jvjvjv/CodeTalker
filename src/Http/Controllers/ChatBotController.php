@@ -23,6 +23,24 @@ class ChatBotController extends Controller
 {
     private const COOKIE_MINUTES = 60 * 24 * 180;
 
+    /**
+     * The single cookie that remembers the visitor's most recent conversation.
+     * Replaces the former per-bot `ai_chat_bot_conversations_{id}` cookies, which
+     * accumulated and grew unbounded until the request header exceeded server limits.
+     */
+    private const CURRENT_COOKIE = 'ai_chat_bot_current';
+
+    /**
+     * Defensive cap on the per-bot conversation switcher list. History lives only in
+     * the server-side session now, so this never affects cookie size.
+     */
+    private const MAX_HISTORY = 25;
+
+    /**
+     * Legacy per-bot cookie names to forget on sight, e.g. `ai_chat_bot_conversations_12`.
+     */
+    private const LEGACY_COOKIE_PATTERN = '/^ai_chat_bot_conversations_\d+$/';
+
     public function __construct(
         private AiChatBotConversationService $conversationService,
         private AiModelReadinessService $modelReadinessService,
@@ -34,6 +52,8 @@ class ChatBotController extends Controller
      */
     public function index(Request $request): InertiaResponse
     {
+        $this->forgetLegacyCookies($request);
+
         $user = $request->user();
 
         $bots = AiChatBot::query()
@@ -390,13 +410,13 @@ class ChatBotController extends Controller
             ->first();
 
         if ($conversation === null) {
-            $this->clearStoredState($request, $aiChatBot);
+            $request->session()->forget($this->stateKey($aiChatBot));
 
             return null;
         }
 
         if ($conversation->user_id !== null && $conversation->user_id !== $request->user()?->id) {
-            $this->clearStoredState($request, $aiChatBot);
+            $request->session()->forget($this->stateKey($aiChatBot));
 
             return null;
         }
@@ -457,11 +477,16 @@ class ChatBotController extends Controller
      */
     protected function storedState(Request $request, AiChatBot $aiChatBot): array
     {
+        $this->forgetLegacyCookies($request);
+
         $state = $request->session()->get($this->stateKey($aiChatBot));
 
         if (!is_array($state)) {
-            $decoded = json_decode((string) $request->cookie($this->stateKey($aiChatBot), '[]'), true);
-            $state = is_array($decoded) ? $decoded : [];
+            $current = $request->cookie(self::CURRENT_COOKIE);
+            $state = [
+                'current' => is_string($current) && $current !== '' ? $current : null,
+                'history' => [],
+            ];
             $request->session()->put($this->stateKey($aiChatBot), $state);
         }
 
@@ -475,19 +500,49 @@ class ChatBotController extends Controller
     }
 
     /**
+     * Persist per-bot state in the server-side session, and mirror only the current
+     * conversation id into the single `ai_chat_bot_current` cookie. History is never
+     * written to a cookie, so the request header stays small regardless of bot count.
+     *
      * @param array{current: ?string, history: array<int, array{handle: string, public_id: string}>} $state
      */
     protected function putStoredState(Request $request, AiChatBot $aiChatBot, array $state): void
     {
-        $request->session()->put($this->stateKey($aiChatBot), $state);
+        $current = is_string($state['current'] ?? null) ? $state['current'] : null;
+        $history = collect($state['history'] ?? [])->take(self::MAX_HISTORY)->values()->all();
+
+        $request->session()->put($this->stateKey($aiChatBot), [
+            'current' => $current,
+            'history' => $history,
+        ]);
+
+        if ($current === null) {
+            Cookie::queue(Cookie::forget(self::CURRENT_COOKIE));
+
+            return;
+        }
+
         Cookie::queue(cookie()->make(
-            $this->stateKey($aiChatBot),
-            json_encode($state, JSON_THROW_ON_ERROR),
+            self::CURRENT_COOKIE,
+            $current,
             self::COOKIE_MINUTES,
-            secure: request()->isSecure(),
+            secure: $request->isSecure(),
             httpOnly: true,
             sameSite: 'lax',
         ));
+    }
+
+    /**
+     * Forget the legacy per-bot conversation cookies. These grew unbounded and, with
+     * one per bot at path `/`, bloated the request header until the server rejected it.
+     */
+    protected function forgetLegacyCookies(Request $request): void
+    {
+        foreach (array_keys($request->cookies->all()) as $name) {
+            if (is_string($name) && preg_match(self::LEGACY_COOKIE_PATTERN, $name) === 1) {
+                Cookie::queue(Cookie::forget($name));
+            }
+        }
     }
 
     protected function rememberConversation(Request $request, AiChatBot $aiChatBot, AiConversation $conversation): void
@@ -511,7 +566,7 @@ class ChatBotController extends Controller
     protected function clearStoredState(Request $request, AiChatBot $aiChatBot): void
     {
         $request->session()->forget($this->stateKey($aiChatBot));
-        Cookie::queue(Cookie::forget($this->stateKey($aiChatBot)));
+        Cookie::queue(Cookie::forget(self::CURRENT_COOKIE));
     }
 
     protected function stateKey(AiChatBot $aiChatBot): string
