@@ -4,7 +4,6 @@ namespace Jvjvjv\CodeTalker\Services;
 
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
 use Jvjvjv\CodeTalker\Enums\AiInteractionStatus;
-use Jvjvjv\CodeTalker\Jobs\ProcessAiMemoryJob;
 use Jvjvjv\CodeTalker\Models\AiChatBot;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
@@ -304,12 +303,6 @@ class AiChatBotConversationService
                         'model' => $conversation->aiSystem->model,
                     ],
                 ]);
-
-                ProcessAiMemoryJob::dispatch(
-                    $conversation->fresh(),
-                    $conversation->user_id,
-                    $conversation->visitor_email
-                );
             }
 
             AiInteractionLog::create([

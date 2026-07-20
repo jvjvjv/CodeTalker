@@ -104,6 +104,11 @@ class AiMemoryService
             ->values()
             ->toArray();
 
+        // No transcript, nothing to learn — skip the provider call entirely.
+        if ($conversationMessages === []) {
+            return ['add' => [], 'update' => [], 'remove' => []];
+        }
+
         $analysisPrompt = $this->buildAnalysisPrompt($existingMemories, $conversationMessages);
 
         $agent = $this->agentFactory->forSystem(
@@ -114,7 +119,11 @@ class AiMemoryService
         );
 
         $response = $this->rawExchanges->capture(
-            RawExchangeFrame::forSystem($conversation->aiSystem, $this->providerConfigurator),
+            RawExchangeFrame::forSystem(
+                $conversation->aiSystem,
+                $this->providerConfigurator,
+                aiConversationId: $conversation->id,
+            ),
             fn () => $agent->prompt($analysisPrompt),
         );
 
@@ -224,16 +233,27 @@ class AiMemoryService
      */
     public function rebuildMemories(string $feature): void
     {
-        // Deactivate existing memories but don't delete them
-        AiFeatureMemory::query()
-            ->forFeature($feature)
-            ->update(['is_active' => false]);
-
         $conversations = AiConversation::query()
             ->where('feature', $feature)
             ->where('status', AiConversationStatus::Completed)
             ->orderBy('created_at')
             ->get();
+
+        // Nothing to rebuild from — leave the existing memories alone. Wiping
+        // them here would destroy every memory for the feature and replace it
+        // with nothing.
+        if ($conversations->isEmpty()) {
+            Log::warning('AI Memory rebuild found no completed conversations; existing memories left untouched', [
+                'feature' => $feature,
+            ]);
+
+            return;
+        }
+
+        // Deactivate existing memories but don't delete them
+        AiFeatureMemory::query()
+            ->forFeature($feature)
+            ->update(['is_active' => false]);
 
         foreach ($conversations as $conversation) {
             // Pass user identity from conversation for proper scoping

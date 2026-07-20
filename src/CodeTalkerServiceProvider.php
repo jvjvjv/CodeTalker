@@ -4,6 +4,7 @@ namespace Jvjvjv\CodeTalker;
 
 use Jvjvjv\CodeTalker\Console\Commands\BackfillAiSystemCapabilitiesCommand;
 use Jvjvjv\CodeTalker\Console\Commands\BackfillConversationUsageCommand;
+use Jvjvjv\CodeTalker\Console\Commands\CompleteIdleConversationsCommand;
 use Jvjvjv\CodeTalker\Console\Commands\PruneProviderExchangesCommand;
 use Jvjvjv\CodeTalker\Console\Commands\SyncConversationUsageCommand;
 use Jvjvjv\CodeTalker\Jobs\BackfillConversationUsageJob;
@@ -186,6 +187,7 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 BackfillConversationUsageCommand::class,
                 SyncConversationUsageCommand::class,
                 PruneProviderExchangesCommand::class,
+                CompleteIdleConversationsCommand::class,
             ]);
         }
 
@@ -201,6 +203,10 @@ class CodeTalkerServiceProvider extends ServiceProvider
 
             Schedule::command('ai:prune-provider-exchanges')
                 ->dailyAt('03:00')
+                ->withoutOverlapping();
+
+            Schedule::command('ai:complete-idle-conversations')
+                ->everyFifteenMinutes()
                 ->withoutOverlapping();
         }
     }

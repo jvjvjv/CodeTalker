@@ -48,8 +48,8 @@ php artisan vendor:publish --tag=code-talker-config --force
 This matters because the package merges its config **shallowly** (Laravel's
 `mergeConfigFrom`). If your app already has a published `config/code-talker.php`
 with a `providers` key, newer or corrected **nested** keys the package ships —
-most notably `providers.*.base_url` and the `raw_exchanges` block — are **not**
-backfilled into it. Your previously published array is used as-is, so a stale
+most notably `providers.*.base_url`, the `raw_exchanges` block, and the
+`conversations` block — are **not** backfilled into it. Your previously published array is used as-is, so a stale
 publish can silently keep an outdated provider base URL (see
 [Troubleshooting](#troubleshooting)).
 
@@ -61,13 +61,14 @@ and copy over only the new keys.
 
 `config/code-talker.php` controls package-wide behavior:
 
-| Key                | Default                                  | Description                                                      |
-| ------------------ | ---------------------------------------- | ---------------------------------------------------------------- |
-| `user_model`       | `App\Models\User::class`                 | Eloquent model used for authenticated users                      |
-| `middleware`       | `['web']`                                | Middleware applied to public chat routes                         |
-| `admin_middleware` | `['web', 'auth', 'can:manage-ai-tools']` | Middleware applied to admin routes                               |
-| `reserved_slugs`   | `[]`                                     | Additional slugs that cannot be used for root-path chatbots      |
-| `schedule`         | `true`                                   | Set to `false` to disable the package's automatic scheduled jobs |
+| Key                                  | Default                                  | Description                                                      |
+| ------------------------------------ | ---------------------------------------- | ---------------------------------------------------------------- |
+| `user_model`                         | `App\Models\User::class`                 | Eloquent model used for authenticated users                      |
+| `middleware`                         | `['web']`                                | Middleware applied to public chat routes                         |
+| `admin_middleware`                   | `['web', 'auth', 'can:manage-ai-tools']` | Middleware applied to admin routes                               |
+| `reserved_slugs`                     | `[]`                                     | Additional slugs that cannot be used for root-path chatbots      |
+| `schedule`                           | `true`                                   | Set to `false` to disable the package's automatic scheduled jobs |
+| `conversations.idle_timeout_minutes` | `30`                                     | Inactivity before a conversation is marked `Completed`           |
 
 ### Suggested host-app packages
 
@@ -421,6 +422,34 @@ configuration, authentication, and the MCP Inspector.
 
 After each completed conversation, `ProcessAiMemoryJob` dispatches and calls `AiMemoryService::processCompletedConversation()`. The service sends the conversation to the same `AiSystem` for analysis and extracts structured memory operations (add / update / remove).
 
+### When memory extraction runs
+
+A conversation is never explicitly "ended" — the browser simply stops sending
+messages. Completion is therefore inferred by the
+`ai:complete-idle-conversations` command, scheduled every 15 minutes:
+
+```
+conversation goes quiet
+        │
+        ├─ idle_timeout_minutes elapse (default 30)
+        │
+        ▼
+ai:complete-idle-conversations  →  status = Completed
+        │
+        ▼
+AiConversationObserver  →  ProcessAiMemoryJob  (once per conversation)
+```
+
+Memories appear up to `idle_timeout_minutes` + 15 after a chat ends. Lower
+`conversations.idle_timeout_minutes` for faster extraction at the cost of
+splitting conversations where the user pauses mid-chat.
+
+Extraction runs **once per conversation**, not once per message —
+`analyzeConversation()` sends the entire transcript on every call, so per-turn
+extraction would cost O(N²) tokens in conversation length. If you disable the
+package scheduler (`'schedule' => false`), register the command yourself or
+memory extraction will never run.
+
 Memories are stored in `AiFeatureMemory` and scoped per user:
 
 - Authenticated users: scoped by `user_id`
@@ -471,13 +500,14 @@ Gate::define('manage-ai-tools', fn ($user) => (bool) $user->is_admin);
 
 ## Scheduled Jobs
 
-The package registers three jobs automatically (requires Laravel's scheduler to be running):
+The package registers four jobs automatically (requires Laravel's scheduler to be running):
 
-| Job                            | Schedule                   | Description                                           |
-| ------------------------------ | -------------------------- | ----------------------------------------------------- |
-| `ai:sync-conversation-usage`   | Twice daily (00:00, 12:00) | Syncs token counts and cost to `AiConversation`       |
-| `BackfillConversationUsageJob` | Daily at 02:30             | Backfills usage for conversations missing cost data   |
-| `ai:prune-provider-exchanges`  | Daily at 03:00             | Removes `ai_provider_exchanges` rows past retention   |
+| Job                              | Schedule                   | Description                                             |
+| -------------------------------- | -------------------------- | ------------------------------------------------------- |
+| `ai:sync-conversation-usage`     | Twice daily (00:00, 12:00) | Syncs token counts and cost to `AiConversation`         |
+| `BackfillConversationUsageJob`   | Daily at 02:30             | Backfills usage for conversations missing cost data     |
+| `ai:prune-provider-exchanges`    | Daily at 03:00             | Removes `ai_provider_exchanges` rows past retention     |
+| `ai:complete-idle-conversations` | Every 15 minutes           | Completes idle conversations, triggering memory extract |
 
 Disable automatic scheduling in config and register manually if needed:
 
@@ -503,4 +533,8 @@ php artisan ai:sync-conversation-usage
 
 # Delete ai_provider_exchanges rows older than raw_exchanges.retention_days
 php artisan ai:prune-provider-exchanges
+
+# Mark idle conversations Completed, triggering memory extraction
+php artisan ai:complete-idle-conversations
+php artisan ai:complete-idle-conversations --minutes=60 --dry-run
 ```

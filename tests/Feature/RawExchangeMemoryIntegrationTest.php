@@ -32,7 +32,7 @@ class RawExchangeMemoryIntegrationTest extends TestCase
         }
     }
 
-    public function test_memory_analysis_records_a_provider_exchange_with_null_links(): void
+    public function test_memory_analysis_records_a_provider_exchange_linked_to_its_conversation(): void
     {
         $completion = json_encode([
             'choices' => [[
@@ -77,7 +77,10 @@ class RawExchangeMemoryIntegrationTest extends TestCase
         $this->assertFalse($exchange->streaming);
         $this->assertSame($completion, $exchange->raw_response);
         $this->assertSame($system->id, $exchange->ai_system_id);
-        $this->assertNull($exchange->ai_conversation_id);
+        // Linked to its conversation so memory calls can be correlated with the
+        // chat turns they analyze when auditing token spend.
+        $this->assertSame($conversation->id, $exchange->ai_conversation_id);
+        // Memory extraction creates no AiLlmMessage record, so this stays null.
         $this->assertNull($exchange->ai_llm_message_id);
     }
 }

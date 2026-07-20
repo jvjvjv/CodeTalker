@@ -144,7 +144,9 @@ class AiChatBotConversationServiceTest extends TestCase
         $conversationTitle = $conversation->fresh()->title;
         $this->assertSame('Hi there', $conversationTitle);
 
-        Queue::assertPushed(ProcessAiMemoryJob::class);
+        // Memory extraction is not per-turn. It fires once, when
+        // ai:complete-idle-conversations marks the conversation Completed.
+        Queue::assertNotPushed(ProcessAiMemoryJob::class);
     }
 
     public function test_tool_calls_run_through_the_registry_and_are_logged(): void

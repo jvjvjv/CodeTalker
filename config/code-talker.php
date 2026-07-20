@@ -55,6 +55,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Conversations
+    |--------------------------------------------------------------------------
+    |
+    | `idle_timeout_minutes` is how long an Active conversation may go without
+    | a new user or assistant message before `ai:complete-idle-conversations`
+    | marks it Completed. Completion is what triggers memory extraction (once
+    | per conversation, via AiConversationObserver), so this also controls how
+    | long after a chat ends its memories appear.
+    |
+    */
+
+    'conversations' => [
+        'idle_timeout_minutes' => (int) env('CODE_TALKER_CONVERSATION_IDLE_MINUTES', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | External MCP Server
     |--------------------------------------------------------------------------
     |

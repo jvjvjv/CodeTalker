@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.0] — 2026-07-20
+
+Memory extraction now runs once per conversation instead of once per assistant message, triggered by a new idle-completion command, and the admin memory rebuild no longer destroys the memories it cannot rebuild.
+
+### Breaking Changes
+- Memory extraction no longer runs after every assistant message. It fires once, when the new `ai:complete-idle-conversations` command marks a conversation `Completed` after `conversations.idle_timeout_minutes` (default 30) without a new message — so memories now appear up to roughly 45 minutes after a chat ends rather than immediately.
+- Hosts that disable the package scheduler (`'schedule' => false`) must register `ai:complete-idle-conversations` themselves, or memory extraction will never run at all.
+- Added the `conversations.idle_timeout_minutes` config key; re-publish or reconcile `config/code-talker.php`, since the package merges config shallowly.
+
+### New Features
+- Added `ai:complete-idle-conversations` (scheduled every 15 minutes), which marks inactive `Active` conversations `Completed` and thereby drives memory extraction. Supports `--minutes` to override the idle window and `--dry-run` to preview.
+- Captured memory-extraction exchanges now record their `ai_conversation_id`, so memory calls can be correlated with the conversation they analyze when auditing token spend.
+
+### Bug Fixes
+- `AiMemoryService::rebuildMemories()` no longer deactivates every memory for a feature when no completed conversations exist to rebuild from; it leaves existing memories untouched and logs a warning instead. Because nothing previously set a conversation to `Completed`, the admin "Rebuild" action deleted all memories for the feature, rebuilt nothing, and reported success.
+- `AiConversationObserver` now runs. No code path previously wrote `AiConversationStatus::Completed`, leaving the observer and its memory-extraction dispatch unreachable.
+- Memory analysis skips conversations with no non-system messages rather than sending an empty transcript to the provider.
+
+### Known Issues
+- Reasoning tokens from `openai-compatible` providers (including LM Studio) may not surface as reasoning events or be included in reported usage, so logged token totals can under-report what the model actually generated.
+
 ## [0.6.0] — 2026-07-19
 
 This release re-platforms the entire provider layer onto Laravel's first-party [laravel/ai](https://github.com/laravel/ai) SDK, deleting the five hand-rolled provider services and three vendor SDK dependencies while keeping the browser SSE wire format, database schema, routes, tool contracts, memory system, and admin endpoints unchanged.
