@@ -147,7 +147,7 @@ An `AiSystem` record represents a fully configured provider endpoint. Create one
 
 | Field              | Description                                                                       |
 | ------------------ | --------------------------------------------------------------------------------- |
-| `provider`         | One of: `anthropic`, `openai`, `openai_compatible`, `gemini`, `grok`, `lm-studio` |
+| `provider`         | One of: `anthropic`, `openai`, `openai-compatible`, `gemini`, `grok`, `lm-studio` |
 | `model`            | Provider-specific model name                                                      |
 | `api_key`          | Stored encrypted                                                                  |
 | `max_tokens`       | Maximum output tokens per request                                                 |
@@ -471,12 +471,13 @@ Gate::define('manage-ai-tools', fn ($user) => (bool) $user->is_admin);
 
 ## Scheduled Jobs
 
-The package registers two jobs automatically (requires Laravel's scheduler to be running):
+The package registers three jobs automatically (requires Laravel's scheduler to be running):
 
-| Job                            | Schedule                   | Description                                         |
-| ------------------------------ | -------------------------- | --------------------------------------------------- |
-| `ai:sync-conversation-usage`   | Twice daily (00:00, 12:00) | Syncs token counts and cost to `AiConversation`     |
-| `BackfillConversationUsageJob` | Daily at 02:30             | Backfills usage for conversations missing cost data |
+| Job                            | Schedule                   | Description                                           |
+| ------------------------------ | -------------------------- | ----------------------------------------------------- |
+| `ai:sync-conversation-usage`   | Twice daily (00:00, 12:00) | Syncs token counts and cost to `AiConversation`       |
+| `BackfillConversationUsageJob` | Daily at 02:30             | Backfills usage for conversations missing cost data   |
+| `ai:prune-provider-exchanges`  | Daily at 03:00             | Removes `ai_provider_exchanges` rows past retention   |
 
 Disable automatic scheduling in config and register manually if needed:
 
@@ -499,4 +500,7 @@ php artisan ai:backfill-conversation-usage
 
 # Sync current token/cost totals to ai_conversations
 php artisan ai:sync-conversation-usage
+
+# Delete ai_provider_exchanges rows older than raw_exchanges.retention_days
+php artisan ai:prune-provider-exchanges
 ```
