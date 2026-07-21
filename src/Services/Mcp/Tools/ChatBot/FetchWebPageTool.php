@@ -69,6 +69,10 @@ class FetchWebPageTool extends Tool
                     'User-Agent' => WebScraperUserAgent::forBotName($this->context->botName()),
                     'Accept' => 'text/html;q=1.0,application/xhtml+xml;q=0.9,application/xml;q=0.8,text/plain;q=0.5,*/*;q=0.7',
                     'Accept-Language' => 'en-US,en;q=0.5',
+                    'Accept-Encoding' => 'gzip, deflate, br',
+                    'Cache-Control' => 'no-cache',
+                    'Pragma' => 'no-cache',
+                    'Upgrade-Insecure-Requests' => '1',
                 ])
                 ->get($url);
         } catch (ConnectionException $e) {

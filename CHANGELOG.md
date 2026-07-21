@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.9.1] — 2026-07-21
+
+This patch improves web-fetch reliability on bot-sensitive sites by making package web requests look more like normal browser navigation while still identifying CodeTalker.
+
+### New Features
+- `WebScraperUserAgent` now builds a browser-style user-agent prefix and appends a package identifier token (`CodeTalker/<version>`) with contact/purpose metadata, with the package version resolved dynamically via Composer instead of being hardcoded.
+
+### Bug Fixes
+- `fetch-web-page` and HTML search requests now include additional browser-like headers (`Accept-Encoding`, `Cache-Control`, `Pragma`, and `Upgrade-Insecure-Requests`) alongside the existing `User-Agent`, `Accept`, and `Accept-Language` headers, reducing empty/partial responses from bot-filtered endpoints.
+
 ## [0.9.0] — 2026-07-21
 
 Chat-turn errors now carry a stable reason code, the max-stream-duration guard budgets each provider request instead of the whole turn, and a timed-out turn no longer discards whatever it already produced. `AiSystem` configs can also pass raw sampling parameters straight through to the provider.
