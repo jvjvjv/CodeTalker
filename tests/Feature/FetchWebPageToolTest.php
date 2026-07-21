@@ -10,6 +10,7 @@ use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Services\Mcp\ToolResultConverter;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\FetchWebPageTool;
 use Jvjvjv\CodeTalker\Support\ToolContext;
+use Jvjvjv\CodeTalker\Support\WebScraperUserAgent;
 use Jvjvjv\CodeTalker\Tests\TestCase;
 use Laravel\Mcp\Request;
 
@@ -26,7 +27,7 @@ class FetchWebPageToolTest extends TestCase
         return ToolResultConverter::toArray($tool->handle(new Request($input)));
     }
 
-    public function testItFetchesHtmlContentWithTheJayScraperUserAgent(): void
+    public function testItFetchesHtmlContentWithTheSharedScraperUserAgent(): void
     {
         Http::fake([
             'https://example.com/article' => Http::response(
@@ -45,7 +46,7 @@ class FetchWebPageToolTest extends TestCase
 
         Http::assertSent(function (HttpRequest $request): bool {
             return $request->url() === 'https://example.com/article'
-                && $request->hasHeader('User-Agent', 'JayScraper/0.2.0 (name: Research Bot; purpose: research; contact: https://jasonvertucio.com)');
+                && $request->hasHeader('User-Agent', WebScraperUserAgent::forBotName('Research Bot'));
         });
 
         $this->assertSame('https://example.com/article', $result['url']);
