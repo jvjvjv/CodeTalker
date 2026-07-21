@@ -106,6 +106,49 @@ class FetchWebPageToolTest extends TestCase
         );
     }
 
+    public function testItTruncatesLongContentByDefault(): void
+    {
+        $longParagraph = str_repeat('a', 25000);
+
+        Http::fake([
+            'https://example.com/long' => Http::response(
+                '<html><head><title>Long</title></head><body><p>' . $longParagraph . '</p></body></html>',
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8'],
+            ),
+        ]);
+
+        $tool = new FetchWebPageTool(new ToolContext());
+
+        $result = $this->runTool($tool, ['url' => 'https://example.com/long']);
+
+        $this->assertTrue($result['truncated']);
+        $this->assertLessThan(25000, mb_strlen($result['content']));
+    }
+
+    public function testItSkipsTruncationWhenTruncateContentIsFalse(): void
+    {
+        $longParagraph = str_repeat('a', 25000);
+
+        Http::fake([
+            'https://example.com/long' => Http::response(
+                '<html><head><title>Long</title></head><body><p>' . $longParagraph . '</p></body></html>',
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8'],
+            ),
+        ]);
+
+        $tool = new FetchWebPageTool(new ToolContext());
+
+        $result = $this->runTool($tool, [
+            'url' => 'https://example.com/long',
+            'truncate_content' => false,
+        ]);
+
+        $this->assertFalse($result['truncated']);
+        $this->assertSame(25000, mb_strlen($result['content']));
+    }
+
     public function testItHandlesPlainTextResponses(): void
     {
         Http::fake([

@@ -24,6 +24,7 @@ use Laravel\Ai\Messages\UserMessage;
 use Laravel\Ai\Streaming\Events\Error as ErrorEvent;
 use Laravel\Ai\Streaming\Events\StreamEnd;
 use Laravel\Ai\Streaming\Events\StreamEvent;
+use Laravel\Ai\Streaming\Events\StreamStart;
 use Laravel\Ai\Streaming\Events\ToolCall as ToolCallEvent;
 use RuntimeException;
 
@@ -182,6 +183,14 @@ class AiChatBotConversationService
 
             $prompt = $userMessage;
             $clientAborted = false;
+            $maxDurationExceeded = false;
+            $maxDurationMessage = null;
+            // Bounds a single provider request, not the whole turn: reset on
+            // every StreamStart, since each continuation attempt AND each
+            // internal tool-call step (laravel/ai's TextGenerationLoop issues
+            // one HTTP request per step) is a fresh generation that deserves
+            // its own budget rather than a shrinking share of the turn's.
+            $stepStartedAt = $startTime;
 
             for ($attempt = 0; $attempt < self::MAX_CONTINUATION_ATTEMPTS; $attempt++) {
                 $attemptTurnNumber = $attempt === 0 ? (string) $turnNumber : "{$turnNumber}.{$attempt}";
@@ -237,6 +246,15 @@ class AiChatBotConversationService
 
                     $events[] = $event;
 
+                    // Each provider request (a continuation attempt, or an
+                    // internal tool-call step within the same attempt) starts
+                    // with its own StreamStart, so this is a fresh generation
+                    // that deserves a fresh budget rather than what's left of
+                    // the turn's.
+                    if ($event instanceof StreamStart) {
+                        $stepStartedAt = microtime(true);
+                    }
+
                     // A non-recoverable provider error can arrive as an in-stream
                     // event (e.g. LM Studio returns HTTP 200 then an SSE
                     // "event: error" like "Context size has been exceeded.").
@@ -245,13 +263,18 @@ class AiChatBotConversationService
                         throw new RuntimeException($event->message);
                     }
 
-                    // Bound total wall-clock time for the turn so a runaway
+                    // Bound wall-clock time for the current request so a runaway
                     // generation (e.g. a reasoning model looping until it
                     // overflows the context window) cannot hang indefinitely.
-                    if ($maxStreamSeconds > 0 && $this->streamElapsedSeconds($startTime) > $maxStreamSeconds) {
-                        throw new RuntimeException(
-                            "The response exceeded the maximum stream duration of {$maxStreamSeconds}s and was aborted.",
-                        );
+                    // This stops the turn like a client abort (below) rather than
+                    // throwing, so whatever streamed so far — including
+                    // reasoning-only content, e.g. a model stuck deliberating
+                    // and never producing an answer — is still persisted below
+                    // instead of silently vanishing.
+                    if ($maxStreamSeconds > 0 && $this->streamElapsedSeconds($stepStartedAt) > $maxStreamSeconds) {
+                        $maxDurationExceeded = true;
+                        $maxDurationMessage = "The response exceeded the maximum stream duration of {$maxStreamSeconds}s and was aborted.";
+                        break;
                     }
 
                     if ($event instanceof ToolCallEvent) {
@@ -295,7 +318,7 @@ class AiChatBotConversationService
                     'created_at' => now(),
                 ]);
 
-                if ($clientAborted) {
+                if ($clientAborted || $maxDurationExceeded) {
                     break;
                 }
 
@@ -308,12 +331,6 @@ class AiChatBotConversationService
                 $prompt = 'Continue.';
             }
 
-            foreach ($translator->finish() as $browserEvent) {
-                yield 'data: ' . json_encode($browserEvent) . "\n\n";
-            }
-
-            yield "data: [DONE]\n\n";
-
             $fullResponse = collect($blocks)->where('type', 'text')->pluck('content')->implode('');
             $thinkingContent = collect($blocks)->where('type', 'reasoning')->pluck('content')->implode("\n\n");
 
@@ -325,7 +342,11 @@ class AiChatBotConversationService
                 $conversation->aiSystem->model,
             );
 
-            if ($fullResponse !== '') {
+            // Persist whatever was produced even when the turn was cut off by
+            // the max-duration guard — including reasoning-only content, so a
+            // model stuck deliberating without ever answering doesn't vanish
+            // without a trace.
+            if ($fullResponse !== '' || $thinkingContent !== '') {
                 AiConversationMessage::create([
                     'ai_conversation_id' => $conversation->id,
                     'role' => 'assistant',
@@ -340,7 +361,7 @@ class AiChatBotConversationService
                 ]);
             }
 
-            AiInteractionLog::create([
+            $interactionLogData = [
                 'ai_system_id' => $conversation->aiSystem->id,
                 'ai_conversation_id' => $conversation->id,
                 'ai_chat_bot_id' => $conversation->ai_chat_bot_id,
@@ -352,16 +373,46 @@ class AiChatBotConversationService
                 'input_token_price_snapshot' => $pricingSnapshot['input_token_price_snapshot'],
                 'output_token_price_snapshot' => $pricingSnapshot['output_token_price_snapshot'],
                 'duration_ms' => $durationMs,
-                'status' => AiInteractionStatus::Success,
-            ]);
+                'status' => $maxDurationExceeded ? AiInteractionStatus::Error : AiInteractionStatus::Success,
+            ];
+
+            if ($maxDurationExceeded) {
+                $interactionLogData['error_message'] = $maxDurationMessage;
+                $interactionLogData['provider_metadata'] = ['error_reason' => 'max_stream_duration'];
+            }
+
+            AiInteractionLog::create($interactionLogData);
 
             $this->conversationUsageService->syncConversation($conversation->fresh());
+
+            if ($maxDurationExceeded) {
+                // Still surfaced to the browser as a failure — the guard genuinely
+                // cut the turn off — but the content above is no longer lost.
+                yield 'data: ' . json_encode([
+                    'type' => 'error',
+                    'message' => $maxDurationMessage,
+                    'reason' => 'max_stream_duration',
+                ]) . "\n\n";
+
+                return;
+            }
+
+            foreach ($translator->finish() as $browserEvent) {
+                yield 'data: ' . json_encode($browserEvent) . "\n\n";
+            }
+
+            yield "data: [DONE]\n\n";
         } catch (\Throwable $exception) {
+            // The max-stream-duration guard no longer throws (it stops the
+            // turn like a client abort so partial content is preserved, see
+            // above), so anything reaching this catch is a genuine provider
+            // failure — an unsupported provider, an unrecoverable in-stream
+            // error event, etc.
             AiLlmMessage::create([
                 'ai_conversation_id' => $conversation->id,
                 'direction' => 'request',
                 'turn_number' => (string) $turnNumber,
-                'request_data' => $requestPayload + ['error' => $exception->getMessage()],
+                'request_data' => $requestPayload + ['error' => $exception->getMessage(), 'error_reason' => 'provider_error'],
                 'created_at' => now(),
             ]);
 
@@ -377,7 +428,11 @@ class AiChatBotConversationService
                 'error_message' => $exception->getMessage(),
             ]);
 
-            yield 'data: ' . json_encode(['type' => 'error', 'message' => $exception->getMessage()]) . "\n\n";
+            yield 'data: ' . json_encode([
+                'type' => 'error',
+                'message' => $exception->getMessage(),
+                'reason' => 'provider_error',
+            ]) . "\n\n";
         }
     }
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0] — 2026-07-21
+
+Chat-turn errors now carry a stable reason code, the max-stream-duration guard budgets each provider request instead of the whole turn, and a timed-out turn no longer discards whatever it already produced. `AiSystem` configs can also pass raw sampling parameters straight through to the provider.
+
+### New Features
+- Added `AiSystem.config.provider_options`, a raw pass-through merged directly into every provider request body (e.g. lm-studio/openai-compatible `frequency_penalty`, `repeat_penalty`, `top_k`, `seed`, `stop`). `model`, `messages`, `stream`, `tools`, and `tool_choice` are stripped so a pasted config can't silently clobber the request; everything else, including `response_format`, passes through untouched.
+- Chat-turn errors — the streamed SSE `error` event plus the persisted `AiInteractionLog` record — now carry a `reason` code (`max_stream_duration` vs `provider_error`) alongside the message, so consumers can distinguish a genuine max-duration abort from other provider failures without pattern-matching on error text.
+- `fetch-web-page` gained `keep_html`, `target_selector`, and `truncate_content` inputs alongside the original `url`, letting callers keep raw HTML, scope extraction to a CSS selector, and opt out of the default 20,000-character truncation.
+
+### Bug Fixes
+- The max-stream-duration guard now resets on every new provider request — a "Continue." reprompt, or an internal tool-call step within the same turn — instead of budgeting the entire turn from a single start time. A multi-step tool-calling turn can no longer be cut off early just because earlier steps used up most of the turn's original allowance.
+- A turn that hits the max-stream-duration guard no longer discards everything it streamed. Previously the abort skipped straight past the persistence code, so a model stuck deliberating with no final answer (but potentially substantial reasoning output) vanished without a trace and left no response record at all. The turn is still logged as a failure, but now keeps whatever text/reasoning content it produced.
+- `fetch-web-page`'s readable-text extraction no longer leaks `<head>` content (notably the page `<title>`) into the extracted `content`, concatenated with no separator onto the start of the visible text.
+
 ## [0.8.0] — 2026-07-21
 
 Adds an `ai:read-exchange` command for inspecting captured provider exchanges and fixes reasoning output being dropped for openai-compatible providers.

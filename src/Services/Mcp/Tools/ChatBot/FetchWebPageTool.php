@@ -38,6 +38,12 @@ class FetchWebPageTool extends Tool
                 ->format('uri')
                 ->description('The full http or https URL of the web page to fetch.')
                 ->required(),
+            'keep_html' => $schema->boolean()
+                ->description('Indicate whether HTML should be kept or stripped. Only works for HTML responses.'),
+            'truncate_content' => $schema->boolean()
+                ->description('Indicate whether content should be truncated at ' . self::MAX_CONTENT_LENGTH . ' bytes.'),
+            'target_selector' => $schema->string()
+                ->description('Selector to target; everything outside of that target_selector will be trimmed. Only works for HTML responses.'),
         ];
     }
 
@@ -61,7 +67,7 @@ class FetchWebPageTool extends Tool
                 ->timeout(20)
                 ->withHeaders([
                     'User-Agent' => WebScraperUserAgent::forBotName($this->context->botName()),
-                    'Accept' => 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.8',
+                    'Accept' => 'text/html;q=1.0,application/xhtml+xml;q=0.9,application/xml;q=0.8,text/plain;q=0.5,*/*;q=0.7',
                     'Accept-Language' => 'en-US,en;q=0.5',
                 ])
                 ->get($url);
@@ -95,6 +101,8 @@ class FetchWebPageTool extends Tool
             return Response::error('The page returned an empty response body.');
         }
 
+        $truncateContent = (bool) $request->get('truncate_content', true);
+
         if (str_contains($contentType, 'text/plain')) {
             $content = $this->normalizeWhitespace($body);
 
@@ -102,8 +110,8 @@ class FetchWebPageTool extends Tool
                 'url' => $url,
                 'title' => null,
                 'content_type' => $contentType,
-                'content' => $this->truncateContent($content),
-                'truncated' => mb_strlen($content) > self::MAX_CONTENT_LENGTH,
+                'content' => $truncateContent ? $this->truncateContent($content) : $content,
+                'truncated' => $truncateContent && mb_strlen($content) > self::MAX_CONTENT_LENGTH,
             ]);
         }
 
@@ -122,7 +130,20 @@ class FetchWebPageTool extends Tool
             $title = null;
         }
 
-        $content = $this->extractReadableText($body);
+        $targetSelector = trim((string) $request->get('target_selector', ''));
+
+        if ($targetSelector !== '') {
+            $targetHtml = $this->extractTargetHtml($body, $url, $targetSelector);
+
+            if ($targetHtml === null) {
+                return Response::error(sprintf('No elements matched target_selector "%s".', $targetSelector));
+            }
+
+            $body = $targetHtml;
+        }
+
+        $keepHtml = $request->get('keep_html', false);
+        $content = $keepHtml ? $body : $this->extractReadableText($body);
 
         if ($content === '') {
             return Response::error('No readable page content could be extracted.');
@@ -132,8 +153,8 @@ class FetchWebPageTool extends Tool
             'url' => $url,
             'title' => $title !== '' ? $title : null,
             'content_type' => $contentType,
-            'content' => $this->truncateContent($content),
-            'truncated' => mb_strlen($content) > self::MAX_CONTENT_LENGTH,
+            'content' => $truncateContent ? $this->truncateContent($content) : $content,
+            'truncated' => $truncateContent && mb_strlen($content) > self::MAX_CONTENT_LENGTH,
         ]);
     }
 
@@ -146,6 +167,7 @@ class FetchWebPageTool extends Tool
     private function extractReadableText(string $html): string
     {
         $withoutNonContent = preg_replace([
+            '/<head\b[^>]*>.*?<\/head>/is',
             '/<script\b[^>]*>.*?<\/script>/is',
             '/<style\b[^>]*>.*?<\/style>/is',
             '/<noscript\b[^>]*>.*?<\/noscript>/is',
@@ -172,5 +194,28 @@ class FetchWebPageTool extends Tool
     private function truncateContent(string $content): string
     {
         return mb_substr($content, 0, self::MAX_CONTENT_LENGTH);
+    }
+
+    private function extractTargetHtml(string $html, string $url, string $selector): ?string {
+        try {
+            $crawler = new Crawler($html, $url);
+            $target = $crawler->filter($selector);
+
+            if ($target->count() === 0) {
+                return null;
+            }
+
+            $node = $target->getNode(0);
+
+            if ($node === null || $node->ownerDocument === null) {
+                return null;
+            }
+
+            $outerHtml = $node->ownerDocument->saveHTML($node);
+
+            return is_string($outerHtml) ? trim($outerHtml) : null;
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

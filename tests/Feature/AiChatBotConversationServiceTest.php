@@ -33,7 +33,9 @@ use Laravel\Ai\Responses\Data\Meta;
 use Laravel\Ai\Responses\Data\ToolCall;
 use Laravel\Ai\Responses\Data\Usage;
 use Laravel\Ai\Streaming\Events\Error;
+use Laravel\Ai\Streaming\Events\ReasoningDelta;
 use Laravel\Ai\Streaming\Events\StreamStart;
+use RuntimeException;
 
 class AiChatBotConversationServiceTest extends TestCase
 {
@@ -228,7 +230,8 @@ class AiChatBotConversationServiceTest extends TestCase
         $bot = $this->makeBot();
 
         // Override the elapsed-time source so the wall-clock guard trips
-        // deterministically, without depending on real streaming duration.
+        // deterministically (on the very first checked event), without
+        // depending on real streaming duration.
         $service = new class(
             $this->app->make(AgentFactory::class),
             $this->app->make(AiMemoryService::class),
@@ -248,14 +251,157 @@ class AiChatBotConversationServiceTest extends TestCase
         $error = collect($events)->firstWhere('type', 'error');
         $this->assertNotNull($error);
         $this->assertStringContainsString('maximum stream duration', $error['message']);
+        // Distinct reason code so the frontend can identify this failure mode
+        // without pattern-matching on message text (which coincidentally
+        // contains "aborted", the same word used for a benign client abort).
+        $this->assertSame('max_stream_duration', $error['reason']);
 
         $log = AiInteractionLog::first();
         $this->assertSame('error', $log->status->value);
         $this->assertStringContainsString('maximum stream duration', $log->error_message);
+        $this->assertSame('max_stream_duration', $log->provider_metadata['error_reason']);
 
-        // The aborted turn is never recorded as a success.
+        // The turn is still recorded as a normal (if failed) attempt — the
+        // guard stops the turn like a client abort rather than throwing, so
+        // it no longer produces the legacy request-direction row with an
+        // 'error' field, and it does produce a clean response row.
+        $this->assertSame(1, AiLlmMessage::where('direction', 'response')->count());
+
+        // Nothing streamed before the guard tripped on the very first event,
+        // so there is no content to preserve.
         $this->assertNull(AiConversationMessage::where('role', 'assistant')->first());
-        $this->assertSame(0, AiLlmMessage::where('direction', 'response')->count());
+    }
+
+    public function test_the_max_duration_guard_preserves_partial_reasoning_content(): void
+    {
+        Queue::fake();
+        CodeTalkerAgent::fake([]);
+
+        // A gateway that streams several reasoning deltas and then never
+        // finishes — simulating a model stuck deliberating without ever
+        // producing an answer.
+        $stuckReasoning = new class([]) extends FakeTextGateway {
+            public function generateStreamStep(
+                string $invocationId,
+                TextProvider $provider,
+                string $model,
+                ?string $instructions,
+                array $messages,
+                array $tools,
+                ?array $schema,
+                ?TextGenerationOptions $options,
+                ?int $timeout,
+                StepContext $stepContext,
+            ): Generator {
+                yield (new StreamStart(uniqid('', true), $provider->name(), $model, time()))
+                    ->withInvocationId($invocationId);
+
+                foreach (['Thinking', ' about', ' this', ' for', ' way', ' too', ' long...'] as $chunk) {
+                    yield (new ReasoningDelta(uniqid('', true), 'reasoning-1', $chunk, time()))
+                        ->withInvocationId($invocationId);
+                }
+
+                // Never actually returns a StepResponse: the guard is expected
+                // to cut this off before the generator completes on its own.
+                throw new RuntimeException('generator should have been abandoned before this point');
+            }
+        };
+
+        $manager = $this->app->make(AiManager::class);
+        (Closure::bind(function () use ($stuckReasoning): void {
+            $this->fakeAgentGateways[CodeTalkerAgent::class] = $stuckReasoning;
+        }, $manager, $manager::class))();
+
+        $bot = $this->makeBot();
+
+        // Trip the guard only after a few reasoning deltas have streamed, so
+        // there is real partial content to preserve.
+        $service = new class(
+            $this->app->make(AgentFactory::class),
+            $this->app->make(AiMemoryService::class),
+            $this->app->make(ConversationUsageService::class),
+            $this->app->make(RawExchangeContext::class),
+            $this->app->make(AiSystemProviderConfigurator::class),
+        ) extends AiChatBotConversationService {
+            private int $calls = 0;
+
+            protected function streamElapsedSeconds(float $startedAt): float
+            {
+                return ++$this->calls > 3 ? 9999.0 : 0.0;
+            }
+        };
+
+        $conversation = $service->startConversation($bot);
+        $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi'));
+
+        $error = collect($events)->firstWhere('type', 'error');
+        $this->assertNotNull($error);
+        $this->assertSame('max_stream_duration', $error['reason']);
+
+        $log = AiInteractionLog::first();
+        $this->assertSame('error', $log->status->value);
+
+        // The reasoning that streamed before the abort is not lost.
+        $message = AiConversationMessage::where('role', 'assistant')->first();
+        $this->assertNotNull($message);
+        $this->assertSame('', $message->content);
+        $this->assertStringContainsString('Thinking about', $message->reasoning_content);
+    }
+
+    public function test_the_max_duration_guard_resets_on_each_provider_request(): void
+    {
+        Queue::fake();
+        Http::fake([
+            'https://example.com/page' => Http::response(
+                '<html><head><title>Hi</title></head><body><p>Body text.</p></body></html>',
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8'],
+            ),
+        ]);
+
+        // A tool-call turn makes two provider requests (the tool_calls step,
+        // then the continuation after the tool result) within a single
+        // continueConversation() call, each with its own StreamStart.
+        CodeTalkerAgent::fake([
+            new ToolCall('tool-1', 'fetch-web-page', ['url' => 'https://example.com/page']),
+            'Summary after reading the page',
+        ]);
+
+        $bot = $this->makeBot(
+            ['allowed_tools' => ['fetch-web-page']],
+            ['tools_enabled' => true],
+        );
+
+        $service = new class(
+            $this->app->make(AgentFactory::class),
+            $this->app->make(AiMemoryService::class),
+            $this->app->make(ConversationUsageService::class),
+            $this->app->make(RawExchangeContext::class),
+            $this->app->make(AiSystemProviderConfigurator::class),
+        ) extends AiChatBotConversationService {
+            /** @var array<int, float> */
+            public array $seenStartedAt = [];
+
+            protected function streamElapsedSeconds(float $startedAt): float
+            {
+                $this->seenStartedAt[] = $startedAt;
+
+                return 0.0;
+            }
+        };
+
+        $conversation = $service->startConversation($bot);
+        $events = $this->drainAndDecode($service->continueConversation($conversation, 'Read the page'));
+
+        // No error: the guard never saw a full-turn-cumulative duration —
+        // each step's requests were checked against a start time reset for
+        // that step.
+        $this->assertNull(collect($events)->firstWhere('type', 'error'));
+
+        // The clock the guard checks against changed between the tool_calls
+        // step and the continuation step, proving the reset actually ran
+        // rather than checking every event against the original turn start.
+        $this->assertGreaterThan(1, count(array_unique($service->seenStartedAt)));
     }
 
     public function test_a_client_abort_stops_the_turn_and_persists_the_partial_response(): void
@@ -348,6 +494,7 @@ class AiChatBotConversationServiceTest extends TestCase
         $error = collect($events)->firstWhere('type', 'error');
         $this->assertNotNull($error);
         $this->assertStringContainsString('Context size has been exceeded', $error['message']);
+        $this->assertSame('provider_error', $error['reason']);
 
         $log = AiInteractionLog::first();
         $this->assertSame('error', $log->status->value);
@@ -374,6 +521,7 @@ class AiChatBotConversationServiceTest extends TestCase
         $error = collect($events)->firstWhere('type', 'error');
         $this->assertNotNull($error);
         $this->assertStringContainsString('Unsupported AI provider', $error['message']);
+        $this->assertSame('provider_error', $error['reason']);
 
         $log = AiInteractionLog::first();
         $this->assertSame('error', $log->status->value);

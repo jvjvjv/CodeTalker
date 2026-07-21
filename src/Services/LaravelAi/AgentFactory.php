@@ -2,6 +2,7 @@
 
 namespace Jvjvjv\CodeTalker\Services\LaravelAi;
 
+use Illuminate\Support\Arr;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Laravel\Ai\Messages\Message;
@@ -125,15 +126,30 @@ class AgentFactory
      */
     protected function providerOptionsFor(AiProvider $provider, AiSystem $system, ?int $maxTokens): array
     {
+        $options = [];
+
         if (
             $provider === AiProvider::Anthropic
             && $system->enable_thinking
             && $maxTokens !== null
             && $maxTokens > 1024
         ) {
-            return ['thinking' => ['type' => 'enabled', 'budget_tokens' => 1024]];
+            $options['thinking'] = ['type' => 'enabled', 'budget_tokens' => 1024];
         }
 
-        return [];
+        // Raw provider-parameter passthrough (e.g. lm-studio's frequency_penalty,
+        // repeat_penalty, top_k, seed, stop). `model` and `messages` are excluded
+        // because they carry the actual request routing/content, built just
+        // before this merge — nothing legitimate ever needs to override them.
+        // `stream` is excluded because a stray true would break the non-streaming
+        // request path (generateTextStep never resets it the way the streaming
+        // path does). `tools`/`tool_choice` are excluded because code-talker
+        // builds them from the tool registry, not from system config.
+        $passthrough = Arr::except(
+            $system->config['provider_options'] ?? [],
+            ['model', 'messages', 'stream', 'tools', 'tool_choice'],
+        );
+
+        return array_merge($options, $passthrough);
     }
 }
