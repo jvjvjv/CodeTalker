@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.8.0] — 2026-07-21
+
+Adds an `ai:read-exchange` command for inspecting captured provider exchanges and fixes reasoning output being dropped for openai-compatible providers.
+
+### New Features
+- Added `php artisan ai:read-exchange {ai_llm_message_id?}`, which prints the captured raw request/response for a provider exchange; omitting the id opens an interactive chatbot → conversation → message drilldown.
+
+### Bug Fixes
+- Openai-compatible providers (including LM Studio) no longer silently drop `reasoning_content`/`reasoning` deltas during streaming — laravel/ai v0.9.0's built-in gateway omitted them, so reasoning models never streamed their "thinking" to the chat UI. `ReasoningOpenAiCompatibleGateway`/`Provider` now re-emit them.
+
 ## [0.7.1] — 2026-07-20
 
 Fixes unbounded chat-cookie growth that could push the request `Cookie` header past the web server's limit and produce a `400 Request Header Or Cookie Too Large`.
