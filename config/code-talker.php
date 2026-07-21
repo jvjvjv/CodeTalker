@@ -68,6 +68,14 @@ return [
 
     'conversations' => [
         'idle_timeout_minutes' => (int) env('CODE_TALKER_CONVERSATION_IDLE_MINUTES', 30),
+
+        // Wall-clock ceiling (seconds) for a single streamed chat turn, across
+        // all tool steps and continuation attempts. Guards against a runaway
+        // generation — e.g. a reasoning model that loops until it overflows the
+        // provider's context window — hanging the turn indefinitely. When the
+        // ceiling is passed the turn is aborted and logged as an error. Set to
+        // 0 (or a negative value) to disable the guard.
+        'max_stream_seconds' => (int) env('CODE_TALKER_MAX_STREAM_SECONDS', 300),
     ],
 
     /*

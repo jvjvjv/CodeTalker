@@ -227,6 +227,12 @@ class ChatBotController extends Controller
         $chatHash = $conversation->generateChatHash();
 
         return response()->stream(function () use ($request, $conversation) {
+            // Keep running after the browser aborts the turn (Cancel button / ESC)
+            // so the streaming service can notice the disconnect via connection_aborted(),
+            // stop generating, and still persist the partial turn instead of being
+            // killed mid-flush.
+            ignore_user_abort(true);
+
             echo 'data: ' . json_encode([
                 'type' => 'status',
                 'phase' => 'request_received',

@@ -21,9 +21,11 @@ use Illuminate\Support\Str;
 use Laravel\Ai\Messages\AssistantMessage;
 use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Messages\UserMessage;
+use Laravel\Ai\Streaming\Events\Error as ErrorEvent;
 use Laravel\Ai\Streaming\Events\StreamEnd;
 use Laravel\Ai\Streaming\Events\StreamEvent;
 use Laravel\Ai\Streaming\Events\ToolCall as ToolCallEvent;
+use RuntimeException;
 
 class AiChatBotConversationService
 {
@@ -132,6 +134,7 @@ class AiChatBotConversationService
         $resolvedModel = $system->model;
         $maxTokens = $system->max_tokens;
         $resolvedTemperature = $conversation->aiChatBot?->resolvedTemperature();
+        $maxStreamSeconds = (int) config('code-talker.conversations.max_stream_seconds', 300);
 
         $toolRegistry = $conversation->aiChatBot?->tools_enabled
             ? new ChatBotToolRegistry(
@@ -178,6 +181,7 @@ class AiChatBotConversationService
             ]) . "\n\n";
 
             $prompt = $userMessage;
+            $clientAborted = false;
 
             for ($attempt = 0; $attempt < self::MAX_CONTINUATION_ATTEMPTS; $attempt++) {
                 $attemptTurnNumber = $attempt === 0 ? (string) $turnNumber : "{$turnNumber}.{$attempt}";
@@ -212,6 +216,16 @@ class AiChatBotConversationService
 
                 try {
                     foreach ($agent->stream($prompt) as $event) {
+                    // The browser can abort an in-flight turn (Cancel button / ESC),
+                    // which closes the HTTP connection. Stop generating as soon as the
+                    // disconnect is visible so we neither keep paying for tokens nor
+                    // spin through further continuation attempts. Whatever streamed so
+                    // far is still persisted below as a partial turn.
+                    if ($this->clientAborted()) {
+                        $clientAborted = true;
+                        break;
+                    }
+
                     Log::debug('Chat bot API stream event', [
                         'conversation_id' => $conversation->id,
                         'ai_chat_bot_id' => $conversation->ai_chat_bot_id,
@@ -222,6 +236,23 @@ class AiChatBotConversationService
                     ]);
 
                     $events[] = $event;
+
+                    // A non-recoverable provider error can arrive as an in-stream
+                    // event (e.g. LM Studio returns HTTP 200 then an SSE
+                    // "event: error" like "Context size has been exceeded.").
+                    // Fail the turn instead of finishing it as a silent success.
+                    if ($event instanceof ErrorEvent && ! $event->recoverable) {
+                        throw new RuntimeException($event->message);
+                    }
+
+                    // Bound total wall-clock time for the turn so a runaway
+                    // generation (e.g. a reasoning model looping until it
+                    // overflows the context window) cannot hang indefinitely.
+                    if ($maxStreamSeconds > 0 && $this->streamElapsedSeconds($startTime) > $maxStreamSeconds) {
+                        throw new RuntimeException(
+                            "The response exceeded the maximum stream duration of {$maxStreamSeconds}s and was aborted.",
+                        );
+                    }
 
                     if ($event instanceof ToolCallEvent) {
                         $toolCalls[] = [
@@ -263,6 +294,10 @@ class AiChatBotConversationService
                     'duration_ms' => $durationMs,
                     'created_at' => now(),
                 ]);
+
+                if ($clientAborted) {
+                    break;
+                }
 
                 if ($translator->lastReason() !== 'length') {
                     break;
@@ -344,6 +379,26 @@ class AiChatBotConversationService
 
             yield 'data: ' . json_encode(['type' => 'error', 'message' => $exception->getMessage()]) . "\n\n";
         }
+    }
+
+    /**
+     * Wall-clock seconds elapsed since the turn started. Extracted so tests can
+     * drive the max-stream-duration guard deterministically.
+     */
+    protected function streamElapsedSeconds(float $startedAt): float
+    {
+        return microtime(true) - $startedAt;
+    }
+
+    /**
+     * Whether the browser has hung up on the streaming response (Cancel/ESC).
+     * Extracted so tests can drive the client-abort guard deterministically.
+     * PHP only flips this flag once output is flushed to the dead connection,
+     * so the controller sets ignore_user_abort(true) and keeps flushing.
+     */
+    protected function clientAborted(): bool
+    {
+        return connection_aborted() !== 0;
     }
 
     /**
