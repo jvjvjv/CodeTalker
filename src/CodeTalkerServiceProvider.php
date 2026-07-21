@@ -6,6 +6,7 @@ use Jvjvjv\CodeTalker\Console\Commands\BackfillAiSystemCapabilitiesCommand;
 use Jvjvjv\CodeTalker\Console\Commands\BackfillConversationUsageCommand;
 use Jvjvjv\CodeTalker\Console\Commands\CompleteIdleConversationsCommand;
 use Jvjvjv\CodeTalker\Console\Commands\PruneProviderExchangesCommand;
+use Jvjvjv\CodeTalker\Console\Commands\ReadProviderExchangeCommand;
 use Jvjvjv\CodeTalker\Console\Commands\SyncConversationUsageCommand;
 use Jvjvjv\CodeTalker\Jobs\BackfillConversationUsageJob;
 use Jvjvjv\CodeTalker\Mcp\Servers\CodeTalkerServer;
@@ -126,6 +127,18 @@ class CodeTalkerServiceProvider extends ServiceProvider
 
         $this->app->make(RawExchangeRecorder::class)->register();
 
+        // Replace laravel/ai's built-in openai-compatible driver with one whose
+        // gateway also streams provider reasoning ("thinking"). extend() takes
+        // precedence over the built-in createOpenaiCompatibleDriver, so every
+        // openai-compatible / lm-studio AiSystem gets it transparently.
+        $this->app->make(\Laravel\Ai\AiManager::class)->extend(
+            'openai-compatible',
+            fn ($app, array $config) => new \Jvjvjv\CodeTalker\Services\LaravelAi\ReasoningOpenAiCompatibleProvider(
+                $config,
+                $app->make(\Illuminate\Contracts\Events\Dispatcher::class),
+            ),
+        );
+
         // Defer route registration until after all service providers (including the host
         // app's RouteServiceProvider) have booted. This ensures specific literal routes
         // like /login are registered before the root-level /{aiChatBot} wildcard.
@@ -188,6 +201,7 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 SyncConversationUsageCommand::class,
                 PruneProviderExchangesCommand::class,
                 CompleteIdleConversationsCommand::class,
+                ReadProviderExchangeCommand::class,
             ]);
         }
 
