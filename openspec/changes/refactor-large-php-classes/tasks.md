@@ -33,16 +33,16 @@
 
 ## 4. AiChatBotConversationService decomposition
 
-- [ ] 4.1 Create `src/Services/ChatBot/Conversation/` with `ConversationTranscript` (systemPrompt + history) and `TranscriptBuilder`, preserving the skip rules for the just-persisted user message and for blank assistant turns
-- [ ] 4.2 Add `RequestPayloadBuilder` (`buildRequestPayload`), `TurnSequence` (`getTurnNumberForConversation`), and `ConversationTitle` (`titleFromUserMessage`), all moved verbatim
-- [ ] 4.3 Add `SystemPromptBuilder` absorbing `buildSystemPrompt` / `buildSystemPromptForBot`, constructed inside the service from the already-injected `AiMemoryService` so the 5-argument constructor is untouched
-- [ ] 4.4 Add `ResponseBlocks` replacing the `$appendToBlocks` closure, with `append()`, `text()`, `reasoning()`, and `toArray()` reproducing the same run-merging and the same `implode`/`implode("\n\n")` joins
-- [ ] 4.5 Add `TurnGuards` holding `elapsedSeconds` and `clientAborted` closures, and `TurnOutcome` carrying `clientAborted`, `maxDurationExceeded`, `maxDurationMessage`, `durationMs`
-- [ ] 4.6 Add `ConversationTurnRunner` as a generator that yields SSE strings and returns a `TurnOutcome`, moving the continuation loop verbatim: raw-exchange push with `finally` pop, per-event debug log, `StreamStart` budget reset, unrecoverable `ErrorEvent` throw, guard checks in their current order, tool-call collection, translation and yielding, the per-attempt request/response `AiLlmMessage` rows, and the `length` re-prompt with `agent->append()`
-- [ ] 4.7 Add `TurnRecorder` for the post-loop writes: the assistant `AiConversationMessage` (including the reasoning-only case), the pricing snapshot, the success/error `AiInteractionLog` with its `max_stream_duration` metadata, the usage sync, and the provider-error `catch` writes
-- [ ] 4.8 Rewrite `continueConversation()` as an orchestrator using `yield from $runner->run(...)`, keeping `startConversation()`, the constructor signature, and the `protected streamElapsedSeconds()` / `clientAborted()` hooks exactly as they are — with the guards passed to the runner as closures bound to `$this`
-- [ ] 4.9 Run `composer test` — every existing `AiChatBotConversationServiceTest` case, including the anonymous-subclass guard overrides, must pass with zero edits to that file
-- [ ] 4.10 Confirm `RawExchangeChatIntegrationTest` still passes, proving the frame push/pop nesting survived the move
+- [x] 4.1 Create `src/Services/ChatBot/Conversation/` with `ConversationTranscript` (systemPrompt + history) and `TranscriptBuilder`, preserving the skip rules for the just-persisted user message and for blank assistant turns
+- [x] 4.2 Add `RequestPayloadBuilder` (`buildRequestPayload`), `TurnSequence` (`getTurnNumberForConversation`), and `ConversationTitle` (`titleFromUserMessage`), all moved verbatim
+- [x] 4.3 Add `SystemPromptBuilder` absorbing `buildSystemPrompt` / `buildSystemPromptForBot`, constructed inside the service from the already-injected `AiMemoryService` so the 5-argument constructor is untouched
+- [x] 4.4 Add `ResponseBlocks` replacing the `$appendToBlocks` closure, with `append()`, `text()`, `reasoning()`, and `toArray()` reproducing the same run-merging and the same `implode`/`implode("\n\n")` joins
+- [x] 4.5 Add `TurnGuards` holding `elapsedSeconds` and `clientAborted` closures, and `TurnOutcome` carrying `clientAborted`, `maxDurationExceeded`, `maxDurationMessage`, `durationMs`
+- [x] 4.6 Add `ConversationTurnRunner` as a generator that yields SSE strings and returns a `TurnOutcome`, moving the continuation loop verbatim: raw-exchange push with `finally` pop, per-event debug log, `StreamStart` budget reset, unrecoverable `ErrorEvent` throw, guard checks in their current order, tool-call collection, translation and yielding, the per-attempt request/response `AiLlmMessage` rows, and the `length` re-prompt with `agent->append()`
+- [x] 4.7 Add `TurnRecorder` for the post-loop writes: the assistant `AiConversationMessage` (including the reasoning-only case), the pricing snapshot, the success/error `AiInteractionLog` with its `max_stream_duration` metadata, the usage sync, and the provider-error `catch` writes
+- [x] 4.8 Rewrite `continueConversation()` as an orchestrator using `yield from $runner->run(...)`, keeping `startConversation()`, the constructor signature, and the `protected streamElapsedSeconds()` / `clientAborted()` hooks exactly as they are — with the guards passed to the runner as closures bound to `$this`
+- [x] 4.9 Run `composer test` — every existing `AiChatBotConversationServiceTest` case, including the anonymous-subclass guard overrides, must pass with zero edits to that file
+- [x] 4.10 Confirm `RawExchangeChatIntegrationTest` still passes, proving the frame push/pop nesting survived the move
 
 ## 5. Verification and wrap-up
 
