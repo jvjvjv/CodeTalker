@@ -1,8 +1,8 @@
 # Changelog
 
-## [0.9.3] — 2026-07-27
+## [0.10.0] — 2026-07-27
 
-This patch restructures the three largest classes in the package — `ChatBotController`, `AiChatBotConversationService`, and `SearchWebTool` — into focused collaborators without changing any behavior. Host apps that only consume the package's routes, services, and tools need to change nothing; the one exception is noted below.
+This release restructures the three largest classes in the package — `ChatBotController`, `AiChatBotConversationService`, and `SearchWebTool` — into focused collaborators without changing any behavior. Host apps that only consume the package's routes, services, and tools need to change nothing; the one exception is noted below.
 
 ### Breaking Changes
 - Removed the `protected` helper methods on `ChatBotController` (`storedState`, `putStoredState`, `storedConversation`, `historyForBot`, `routeUrlFor`, `abortIfInaccessible`, `rememberConversation`, `clearStoredState`, `requestAccessPath`, `stateKey`, `forgetLegacyCookies`). A host app that subclassed the controller to override them should move to the extracted services in `Jvjvjv\CodeTalker\Services\ChatBot\` — `ConversationSessionStore`, `ChatBotAccessGuard`, `ChatBotRouteUrls`, and `ConversationHistoryPresenter` — which are resolved from the container and can be swapped there instead.
