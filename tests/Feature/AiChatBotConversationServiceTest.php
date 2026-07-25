@@ -169,6 +169,54 @@ class AiChatBotConversationServiceTest extends TestCase
         Queue::assertNotPushed(ProcessAiMemoryJob::class);
     }
 
+    /**
+     * Characterization test: the browser wire format is a compatibility surface,
+     * so a normal turn's complete event sequence — not just its highlights — is
+     * pinned here against accidental reordering or additions.
+     */
+    public function test_a_normal_turn_emits_the_exact_sse_event_sequence(): void
+    {
+        Queue::fake();
+        CodeTalkerAgent::fake(['Hello world from fake']);
+
+        $bot = $this->makeBot();
+        $service = $this->app->make(AiChatBotConversationService::class);
+        $conversation = $service->startConversation($bot);
+
+        $rawLines = [];
+        $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi there'), $rawLines);
+
+        $this->assertSame(
+            [
+                'status',
+                'message_start',
+                // One delta per streamed chunk of "Hello world from fake".
+                'content_block_delta',
+                'content_block_delta',
+                'content_block_delta',
+                'content_block_delta',
+                'message_delta',
+                'message_stop',
+            ],
+            array_column($events, 'type'),
+        );
+
+        // Every line is a well-formed SSE frame, and the stream is terminated.
+        foreach ($rawLines as $line) {
+            $this->assertStringStartsWith('data: ', $line);
+            $this->assertStringEndsWith("\n\n", $line);
+        }
+
+        $this->assertSame("data: [DONE]\n\n", end($rawLines));
+        $this->assertCount(count($events) + 1, $rawLines);
+
+        // The leading status frame reports the model-loading phase verbatim.
+        $this->assertSame(
+            ['type' => 'status', 'phase' => 'model_loading', 'message' => 'Waiting for model response...'],
+            $events[0],
+        );
+    }
+
     public function test_tool_calls_run_through_the_registry_and_are_logged(): void
     {
         Queue::fake();

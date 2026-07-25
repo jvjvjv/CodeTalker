@@ -40,6 +40,28 @@ class ChatBotToolRegistryTest extends TestCase
         $this->assertArrayHasKey('topics', $byName['scan-memories']['input_schema']['properties']);
     }
 
+    /**
+     * Tool discovery walks the ChatBot tools directory recursively, so any
+     * collaborator class added in a subdirectory is visited too. This pins the
+     * discovered tool set so a helper that accidentally extends Tool (or
+     * implements the legacy contract) shows up here rather than in production.
+     */
+    public function test_discovery_finds_exactly_the_package_tools(): void
+    {
+        $conversation = new AiConversation(['feature' => 'chat-bot:test']);
+
+        $registry = new ChatBotToolRegistry(
+            $conversation,
+            allowedToolNames: null,
+            exposeAllDiscoveredTools: true,
+        );
+
+        $this->assertEqualsCanonicalizing(
+            ['fetch-web-page', 'search-web', 'scan-memories'],
+            array_column($registry->toApiTools(), 'name'),
+        );
+    }
+
     public function test_allowed_tools_filters_the_exposed_tools(): void
     {
         $tools = $this->registry(['fetch-web-page'])->toApiTools();
