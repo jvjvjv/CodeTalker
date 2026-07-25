@@ -1,23 +1,23 @@
 ## 1. Baseline and characterization tests
 
 - [x] 1.1 Run `composer test` and record the passing baseline (test count + assertions) to compare against after every stage — **baseline: 109 tests, 346 assertions**
-- [ ] 1.2 Add `tests/Feature/ChatBotPagePropsTest.php` pinning the exact Inertia component + prop set for `index()`, `show()` (session-backed conversation, and none), and `showByHash()` — including that `chatHash` appears only in the by-hash payload and that `showIdentityForm` is derived differently in each
-- [ ] 1.3 Extend `tests/Feature/AiChatBotConversationServiceTest.php` with a full-sequence SSE assertion for a normal completed turn: the `model_loading` status line, the translated deltas in order, and the trailing `data: [DONE]`
-- [ ] 1.4 Extend `tests/Feature/SearchWebToolTest.php` to snapshot the complete `Response::structured()` payload (all eight top-level keys) and the rendered markdown for a faked multi-engine search, plus the single-engine-failure shape
-- [ ] 1.5 Add a discovery test asserting `ChatBotToolRegistry` resolves exactly the current tool-name set (guards the upcoming `SearchWeb/` subdirectory)
-- [ ] 1.6 Confirm 1.2–1.5 pass against the current, unmodified code, then commit them alone
+- [x] 1.2 Add `tests/Feature/ChatBotPagePropsTest.php` pinning the exact Inertia component + prop set for `index()`, `show()` (session-backed conversation, and none), and `showByHash()` — including that `chatHash` appears only in the by-hash payload and that `showIdentityForm` is derived differently in each
+- [x] 1.3 Extend `tests/Feature/AiChatBotConversationServiceTest.php` with a full-sequence SSE assertion for a normal completed turn: the `model_loading` status line, the translated deltas in order, and the trailing `data: [DONE]`
+- [x] 1.4 Extend `tests/Feature/SearchWebToolTest.php` to snapshot the complete `Response::structured()` payload (all eight top-level keys) and the rendered markdown for a faked multi-engine search, plus the single-engine-failure shape
+- [x] 1.5 Add a discovery test asserting `ChatBotToolRegistry` resolves exactly the current tool-name set (guards the upcoming `SearchWeb/` subdirectory)
+- [x] 1.6 Confirm 1.2–1.5 pass against the current, unmodified code, then commit them alone
 
 ## 2. SearchWebTool decomposition
 
-- [ ] 2.1 Create `src/Services/Mcp/Tools/ChatBot/SearchWeb/` with the value objects: `SearchQuery` (query, limit, page, `offset()`, `start()`), `SearchResult` (title, url, description), and `EngineResults` (source, queryUrl, results, error) with an `EngineResults::failed()` named constructor replacing `httpErrorResult()`
-- [ ] 2.2 Add `ResultUrlNormalizer` (`normalizeResultUrl`, `normalizeGoogleUrl`, DuckDuckGo `uddg` unwrap, http/https scheme allow-list) and `HtmlResultParser` (the four engine regexes, `cleanHtmlText`, result capping) — moved verbatim
-- [ ] 2.3 Add `SearchHttpClients` with `webHttpClient()` / `apiHttpClient()`, taking `ToolContext` so the `WebScraperUserAgent::forBotName()` header is unchanged
-- [ ] 2.4 Define the `SearchEngine` interface (`key()`, `search(SearchQuery): EngineResults`) and implement `DuckDuckGoSearchEngine` first, since it has a single fetch strategy
-- [ ] 2.5 Implement `BingSearchEngine`, `GoogleSearchEngine`, and `BraveSearchEngine`, each keeping its own API-key check, endpoint config lookups, and API-vs-web strategy choice
-- [ ] 2.6 Add `SearchEngineRegistry` owning the supported-engine list, key→engine resolution, and the unsupported-engine validation message
-- [ ] 2.7 Add `SearchResultsMarkdown` (`render()`, `escapeMarkdownText()`) producing byte-identical markdown, including the trailing "continue searching" block
-- [ ] 2.8 Rewrite `SearchWebTool` to input validation → registry resolution → per-engine try/catch with the existing `Log::warning` → structured response assembly, keeping its attributes, `schema()`, `handle()`, and single-`ToolContext` constructor
-- [ ] 2.9 Verify no class under `SearchWeb/` extends `Laravel\Mcp\Server\Tool` or implements `AiToolHandlerContract`, then run `composer test` — 1.4 and 1.5 must pass unchanged
+- [x] 2.1 Create `src/Services/Mcp/Tools/ChatBot/SearchWeb/` with the value objects: `SearchQuery` (query, limit, page, `offset()`, `start()`), `SearchResult` (title, url, description), and `EngineResults` (source, queryUrl, results, error) with an `EngineResults::failed()` named constructor replacing `httpErrorResult()`
+- [x] 2.2 Add `ResultUrlNormalizer` (`normalizeResultUrl`, `normalizeGoogleUrl`, DuckDuckGo `uddg` unwrap, http/https scheme allow-list) and `HtmlResultParser` (the four engine regexes, `cleanHtmlText`, result capping) — moved verbatim
+- [x] 2.3 Add `SearchHttpClients` with `webHttpClient()` / `apiHttpClient()`, taking `ToolContext` so the `WebScraperUserAgent::forBotName()` header is unchanged
+- [x] 2.4 Define the `SearchEngine` interface (`key()`, `search(SearchQuery): EngineResults`) and implement `DuckDuckGoSearchEngine` first, since it has a single fetch strategy
+- [x] 2.5 Implement `BingSearchEngine`, `GoogleSearchEngine`, and `BraveSearchEngine`, each keeping its own API-key check, endpoint config lookups, and API-vs-web strategy choice
+- [x] 2.6 Add `SearchEngineRegistry` owning the supported-engine list, key→engine resolution, and the unsupported-engine validation message
+- [x] 2.7 Add `SearchResultsMarkdown` (`render()`, `escapeMarkdownText()`) producing byte-identical markdown, including the trailing "continue searching" block
+- [x] 2.8 Rewrite `SearchWebTool` to input validation → registry resolution → per-engine try/catch with the existing `Log::warning` → structured response assembly, keeping its attributes, `schema()`, `handle()`, and single-`ToolContext` constructor
+- [x] 2.9 Verify no class under `SearchWeb/` extends `Laravel\Mcp\Server\Tool` or implements `AiToolHandlerContract`, then run `composer test` — 1.4 and 1.5 must pass unchanged
 
 ## 3. ChatBotController decomposition
 
