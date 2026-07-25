@@ -51,7 +51,7 @@
 - [x] 5.3 Grep `src/` and `tests/` for references to the removed `protected`/`private` helper names to confirm none remain — **clean; the only surviving names (`requestAccessPath`, `stateKey`, `forgetLegacyCookies`) are the new homes, not stale callers**
 - [ ] 5.4 Manually exercise a live chat turn against a configured `AiSystem` to confirm the browser stream, reasoning display, and cost readout are visually unchanged — **not done: needs a running host app and real provider credentials, so this one is the maintainer's to run**
 - [x] 5.5 Update `CLAUDE.md`'s Architecture section to name the new `Services/ChatBot/`, `Services/ChatBot/Conversation/`, and `SearchWeb/` namespaces so future work follows the same structure
-- [ ] 5.6 Add a CHANGELOG entry for the next release noting the internal restructure and the removal of `ChatBotController`'s `protected` helpers as a host-app extension point — **deliberately skipped: `CLAUDE.md` states "Pre-release / in-progress work is not logged until the version ships", and this work is unreleased. Fold it into the entry when the next version is cut.**
+- [x] 5.6 Add a CHANGELOG entry for the next release noting the internal restructure and the removal of `ChatBotController`'s `protected` helpers as a host-app extension point — **added as `0.9.3` — 2026-07-27 at the maintainer's direction**
 
 ### Note on 5.2
 

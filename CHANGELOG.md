@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.9.3] — 2026-07-27
+
+This patch restructures the three largest classes in the package — `ChatBotController`, `AiChatBotConversationService`, and `SearchWebTool` — into focused collaborators without changing any behavior. Host apps that only consume the package's routes, services, and tools need to change nothing; the one exception is noted below.
+
+### Breaking Changes
+- Removed the `protected` helper methods on `ChatBotController` (`storedState`, `putStoredState`, `storedConversation`, `historyForBot`, `routeUrlFor`, `abortIfInaccessible`, `rememberConversation`, `clearStoredState`, `requestAccessPath`, `stateKey`, `forgetLegacyCookies`). A host app that subclassed the controller to override them should move to the extracted services in `Jvjvjv\CodeTalker\Services\ChatBot\` — `ConversationSessionStore`, `ChatBotAccessGuard`, `ChatBotRouteUrls`, and `ConversationHistoryPresenter` — which are resolved from the container and can be swapped there instead.
+
+### New Features
+- Chat-bot conversation logic is now available as separately usable services: `Services\ChatBot\` covers session state, access, route URLs, page payloads, and SSE streaming, and `Services\ChatBot\Conversation\` covers the turn runner, transcript, system prompt, and turn recording.
+- `search-web` engines are now individually addressable through the `Services\Mcp\Tools\ChatBot\SearchWeb\SearchEngine` contract, with one implementation per engine behind `SearchEngineRegistry`.
+
 ## [0.9.2] — 2026-07-21
 
 This patch fixes the Fetch Web Page tool test so it matches the shared scraper user-agent helper instead of a stale hardcoded expectation.
