@@ -21,15 +21,15 @@
 
 ## 3. ChatBotController decomposition
 
-- [ ] 3.1 Create `src/Services/ChatBot/ConversationSessionStore` absorbing `storedState`, `putStoredState`, `rememberConversation`, `clearStoredState`, `stateKey`, `storedConversation`, `forgetLegacyCookies` and the four cookie/history constants
-- [ ] 3.2 Add `tests/Feature/ConversationSessionStoreTest.php` covering the legacy-cookie sweep, the 25-entry history cap, the cookie flags (http-only, lax, 180 days, secure-follows-scheme), and the foreign-`user_id` discard path
-- [ ] 3.3 Add `ChatBotAccessGuard` (`abortIfInaccessible`, `requestAccessPath`) and `ChatBotRouteUrls` (`routeUrlFor` with the root-vs-chat prefix choice)
-- [ ] 3.4 Add `ConversationHistoryPresenter` absorbing `historyForBot`, preserving the `is_current` comparison, the null-conversation filter, and the `diffForHumans()` fallback chain
-- [ ] 3.5 Add `ChatBotPagePayload` building the shared `ai/ChatBot` props, taking `chatHash` inclusion and `showIdentityForm` as explicit parameters so `show()` and `showByHash()` keep their existing differences
-- [ ] 3.6 Add `ChatBotIndexPayload` (bot + conversations mapping, authenticated-user-only conversation lookup) and `ChatBotStatusResolver` (per-`ai_system_id` memoization behind the slug-keyed result)
-- [ ] 3.7 Add `ChatStreamResponse` wrapping the `response()->stream()` closure: `ignore_user_abort(true)`, the `request_received` preamble, the `ob_flush`/`flush` loop, the `X-Chat-Hash` header and SSE headers, and the throwable fallback that emits an error plus `[DONE]`
-- [ ] 3.8 Rewrite `ChatBotController` to constructor-inject the new collaborators alongside the existing `AiChatBotConversationService` and `AiModelReadinessService`, reducing each action to delegation and removing the now-empty `protected` helpers
-- [ ] 3.9 Run `composer test` — `ChatBotCookieTest` and the 1.2 prop test must pass unchanged
+- [x] 3.1 Create `src/Services/ChatBot/ConversationSessionStore` absorbing `storedState`, `putStoredState`, `rememberConversation`, `clearStoredState`, `stateKey`, `storedConversation`, `forgetLegacyCookies` and the four cookie/history constants
+- [x] 3.2 Add `tests/Feature/ConversationSessionStoreTest.php` covering the legacy-cookie sweep, the 25-entry history cap, the cookie flags (http-only, lax, 180 days, secure-follows-scheme), and the foreign-`user_id` discard path
+- [x] 3.3 Add `ChatBotAccessGuard` (`abortIfInaccessible`, `requestAccessPath`) and `ChatBotRouteUrls` (`routeUrlFor` with the root-vs-chat prefix choice)
+- [x] 3.4 Add `ConversationHistoryPresenter` absorbing `historyForBot`, preserving the `is_current` comparison, the null-conversation filter, and the `diffForHumans()` fallback chain
+- [x] 3.5 Add `ChatBotPagePayload` building the shared `ai/ChatBot` props, taking `chatHash` inclusion and `showIdentityForm` as explicit parameters so `show()` and `showByHash()` keep their existing differences
+- [x] 3.6 Add `ChatBotIndexPayload` (bot + conversations mapping, authenticated-user-only conversation lookup) and `ChatBotStatusResolver` (per-`ai_system_id` memoization behind the slug-keyed result)
+- [x] 3.7 Add `ChatStreamResponse` wrapping the `response()->stream()` closure: `ignore_user_abort(true)`, the `request_received` preamble, the `ob_flush`/`flush` loop, the `X-Chat-Hash` header and SSE headers, and the throwable fallback that emits an error plus `[DONE]`
+- [x] 3.8 Rewrite `ChatBotController` to constructor-inject the new collaborators alongside the existing `AiChatBotConversationService` and `AiModelReadinessService`, reducing each action to delegation and removing the now-empty `protected` helpers
+- [x] 3.9 Run `composer test` — `ChatBotCookieTest` and the 1.2 prop test must pass unchanged
 
 ## 4. AiChatBotConversationService decomposition
 
