@@ -217,6 +217,66 @@ class AiChatBotConversationServiceTest extends TestCase
         );
     }
 
+    /**
+     * The `[DONE]` sentinel is part of the documented stream contract, and it is
+     * asymmetric: only a turn that finishes sends it. A turn that ends in an
+     * error frame stops there, so a client must treat an error as terminal in
+     * its own right rather than waiting for a terminator that never arrives.
+     */
+    public function test_only_a_finished_turn_is_terminated_with_done(): void
+    {
+        Queue::fake();
+
+        // A turn that completes normally.
+        CodeTalkerAgent::fake(['All done']);
+        $bot = $this->makeBot();
+        $service = $this->app->make(AiChatBotConversationService::class);
+
+        $rawLines = [];
+        $this->drainAndDecode($service->continueConversation($service->startConversation($bot), 'Hi'), $rawLines);
+
+        $this->assertSame("data: [DONE]\n\n", end($rawLines));
+
+        // A turn cut off by the max-duration guard.
+        config()->set('code-talker.conversations.max_stream_seconds', 60);
+        CodeTalkerAgent::fake(['Never finishes']);
+
+        $timingOut = new class(
+            $this->app->make(AgentFactory::class),
+            $this->app->make(AiMemoryService::class),
+            $this->app->make(ConversationUsageService::class),
+            $this->app->make(RawExchangeContext::class),
+            $this->app->make(AiSystemProviderConfigurator::class),
+        ) extends AiChatBotConversationService {
+            protected function streamElapsedSeconds(float $startedAt): float
+            {
+                return 9999.0;
+            }
+        };
+
+        $rawLines = [];
+        $events = $this->drainAndDecode(
+            $timingOut->continueConversation($timingOut->startConversation($this->makeBot([], ['slug' => 'timeout-bot'])), 'Hi'),
+            $rawLines,
+        );
+
+        $this->assertSame('max_stream_duration', end($events)['reason']);
+        $this->assertStringNotContainsString('[DONE]', end($rawLines));
+
+        // A turn that fails on the provider.
+        $failing = $this->makeBot([], ['slug' => 'broken-bot']);
+        $failing->aiSystem->forceFill(['provider' => 'not-a-real-provider'])->save();
+
+        $rawLines = [];
+        $events = $this->drainAndDecode(
+            $service->continueConversation($service->startConversation($failing)->fresh(), 'Hi'),
+            $rawLines,
+        );
+
+        $this->assertSame('provider_error', end($events)['reason']);
+        $this->assertStringNotContainsString('[DONE]', end($rawLines));
+    }
+
     public function test_tool_calls_run_through_the_registry_and_are_logged(): void
     {
         Queue::fake();

@@ -55,6 +55,25 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Inertia Components
+    |--------------------------------------------------------------------------
+    |
+    | The Inertia components the public chat pages render. Point these at your
+    | own component paths if your app does not use the defaults; the props
+    | passed to them are unchanged either way, and are documented under
+    | "Frontend Integration" in the README.
+    |
+    */
+
+    'inertia' => [
+        'components' => [
+            'chat_bot' => 'ai/ChatBot',
+            'chat_bots_index' => 'ai/ChatBotsIndex',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Conversations
     |--------------------------------------------------------------------------
     |

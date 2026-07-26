@@ -46,7 +46,7 @@ class ChatBotController extends Controller
     {
         $this->sessions->forgetLegacyCookies($request);
 
-        return Inertia::render('ai/ChatBotsIndex', [
+        return Inertia::render($this->component('chat_bots_index', 'ai/ChatBotsIndex'), [
             'bots' => $this->indexPayload->build($request->user()),
         ]);
     }
@@ -65,7 +65,7 @@ class ChatBotController extends Controller
 
         $conversation = $this->sessions->currentConversation($request, $aiChatBot);
 
-        return Inertia::render('ai/ChatBot', $this->pagePayload->build(
+        return Inertia::render($this->component('chat_bot', 'ai/ChatBot'), $this->pagePayload->build(
             $aiChatBot,
             $conversation,
             $this->history->forBot($request, $aiChatBot),
@@ -95,7 +95,7 @@ class ChatBotController extends Controller
         // Adopt the linked conversation as the current one for this browser.
         $this->sessions->remember($request, $bot, $conversation);
 
-        return Inertia::render('ai/ChatBot', $this->pagePayload->build(
+        return Inertia::render($this->component('chat_bot', 'ai/ChatBot'), $this->pagePayload->build(
             $bot,
             $conversation,
             $this->history->forBot($request, $bot),
@@ -180,6 +180,20 @@ class ChatBotController extends Controller
         $this->sessions->startNewChat($request, $aiChatBot);
 
         return redirect($this->urls->for($aiChatBot, 'show'));
+    }
+
+    /**
+     * The Inertia component to render for one of the chat pages.
+     *
+     * The fallback is not decoration: Laravel skips a package's config merge
+     * entirely when the host has cached its configuration, so a host that
+     * published `code-talker.php` before this key existed has no `inertia`
+     * entry at all — and would otherwise render a null component in production
+     * only.
+     */
+    private function component(string $key, string $default): string
+    {
+        return (string) config("code-talker.inertia.components.{$key}", $default);
     }
 
     /**

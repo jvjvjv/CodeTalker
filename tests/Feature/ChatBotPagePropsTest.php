@@ -329,6 +329,71 @@ class ChatBotPagePropsTest extends TestCase
         $this->assertFalse($conversations[0]['is_stale']);
     }
 
+    public function test_component_names_come_from_config(): void
+    {
+        $bot = $this->makeBot();
+
+        config()->set('code-talker.inertia.components.chat_bot', 'custom/Chat');
+        config()->set('code-talker.inertia.components.chat_bots_index', 'custom/ChatIndex');
+
+        $this->get('/chats', ['X-Inertia' => 'true'])
+            ->assertOk()
+            ->assertJsonPath('component', 'custom/ChatIndex');
+
+        $response = $this->get('/chat/' . $bot->slug, ['X-Inertia' => 'true'])
+            ->assertOk()
+            ->assertJsonPath('component', 'custom/Chat');
+
+        // Overriding the component must not disturb any prop.
+        $this->assertSame([
+            'bot',
+            'chatUrl',
+            'chatUrlBase',
+            'history',
+            'messageUrl',
+            'messages',
+            'resetUrl',
+            'showIdentityForm',
+            'statusUrl',
+            'switchUrl',
+            'warmupUrl',
+        ], collect(array_keys($this->props($response)))->sort()->values()->all());
+    }
+
+    public function test_the_hash_page_uses_the_configured_chat_bot_component(): void
+    {
+        $bot = $this->makeBot();
+        $conversation = $this->app->make(AiChatBotConversationService::class)->startConversation($bot);
+        $hash = $conversation->generateChatHash();
+
+        config()->set('code-talker.inertia.components.chat_bot', 'custom/Chat');
+
+        $this->get('/chat/' . $bot->slug . '/' . $hash, ['X-Inertia' => 'true'])
+            ->assertOk()
+            ->assertJsonPath('component', 'custom/Chat');
+    }
+
+    /**
+     * A host that published `config/code-talker.php` before the `inertia` key
+     * existed and then ran `config:cache` has no such key at all — Laravel skips
+     * the package config merge when configuration is cached. The inline
+     * fallbacks must carry that case, which otherwise fails in production only.
+     */
+    public function test_the_defaults_survive_a_config_without_the_inertia_key(): void
+    {
+        $bot = $this->makeBot();
+
+        config()->set('code-talker.inertia', null);
+
+        $this->get('/chats', ['X-Inertia' => 'true'])
+            ->assertOk()
+            ->assertJsonPath('component', 'ai/ChatBotsIndex');
+
+        $this->get('/chat/' . $bot->slug, ['X-Inertia' => 'true'])
+            ->assertOk()
+            ->assertJsonPath('component', 'ai/ChatBot');
+    }
+
     public function test_inaccessible_bots_abort_with_404(): void
     {
         $bot = $this->makeBot('inactive', ['is_active' => false]);
