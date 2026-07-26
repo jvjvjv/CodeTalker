@@ -49,7 +49,7 @@
 - [x] 5.1 Run the full suite and confirm the test count and assertion count match or exceed the 1.1 baseline, with no skipped or incomplete tests — **138 tests / 470 assertions, up from the 109 / 346 baseline; none skipped**
 - [x] 5.2 Confirm the three target files are each under ~150 lines and that no new class exceeds it — **partially met, see note below**
 - [x] 5.3 Grep `src/` and `tests/` for references to the removed `protected`/`private` helper names to confirm none remain — **clean; the only surviving names (`requestAccessPath`, `stateKey`, `forgetLegacyCookies`) are the new homes, not stale callers**
-- [ ] 5.4 Manually exercise a live chat turn against a configured `AiSystem` to confirm the browser stream, reasoning display, and cost readout are visually unchanged — **not done: needs a running host app and real provider credentials, so this one is the maintainer's to run**
+- [x] 5.4 Manually exercise a live chat turn against a configured `AiSystem` to confirm the browser stream, reasoning display, and cost readout are visually unchanged — **run and confirmed by the maintainer against a live provider, after the host app was repaired for 0.10.0**
 - [x] 5.5 Update `CLAUDE.md`'s Architecture section to name the new `Services/ChatBot/`, `Services/ChatBot/Conversation/`, and `SearchWeb/` namespaces so future work follows the same structure
 - [x] 5.6 Add a CHANGELOG entry for the next release noting the internal restructure and the removal of `ChatBotController`'s `protected` helpers as a host-app extension point — **added as `0.9.3` — 2026-07-27 at the maintainer's direction**
 
