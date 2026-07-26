@@ -10,9 +10,9 @@
 
 ## 2. Configurable component names
 
-- [ ] 2.1 Add an `inertia.components` block to `config/code-talker.php` with `chat_bot` => `ai/ChatBot` and `chat_bots_index` => `ai/ChatBotsIndex`, documented in the file's comment style
-- [ ] 2.2 Read the component names from config in `ChatBotController::index()`, `show()`, and `showByHash()`
-- [ ] 2.3 Extend `tests/Feature/ChatBotPagePropsTest.php` to assert the defaults render `ai/ChatBot` and `ai/ChatBotsIndex`, and that overriding each config key changes the rendered component while leaving every prop key and value untouched
+- [ ] 2.1 Add `inertia.components` as a **new top-level key** in `config/code-talker.php` with `chat_bot` => `ai/ChatBot` and `chat_bots_index` => `ai/ChatBotsIndex`, documented in the file's comment style. It must not be nested under an existing top-level key: `mergeConfigFrom` is a shallow `array_merge`, so a host's already-published copy of an existing block would replace the package's wholesale and silently drop the new subkey
+- [ ] 2.2 Read the component names with an **inline default** — `config('code-talker.inertia.components.chat_bot', 'ai/ChatBot')` — in `ChatBotController::index()`, `show()`, and `showByHash()`, matching the convention every other nested config read in `src/` already follows. This is load-bearing, not stylistic: a host that published its config before this key existed and then ran `config:cache` skips `mergeConfigFrom` entirely, so without the inline default the component name resolves to `null` in production only
+- [ ] 2.3 Extend `tests/Feature/ChatBotPagePropsTest.php` to assert the defaults render `ai/ChatBot` and `ai/ChatBotsIndex`, that overriding each config key changes the rendered component while leaving every prop key and value untouched, and — covering the cached-config case — that **unsetting the `code-talker.inertia` key entirely still renders the default components** rather than failing
 - [ ] 2.4 Document the new config keys in the README's Configuration section
 - [ ] 2.5 Run `composer test` — all existing tests must pass unchanged
 

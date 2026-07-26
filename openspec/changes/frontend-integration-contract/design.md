@@ -73,6 +73,12 @@ This is the cheapest fix for a real host-app problem: today the only way to rend
 
 *Alternative considered:* resolving component names through the payload builders. Rejected — the payload builders own props, not routing to a view; putting the name there conflates two concerns.
 
+**Two constraints make this backward-compatible, and both are easy to get wrong:**
+
+`inertia` must be a **new top-level config key**. `mergeConfigFrom` is a shallow `array_merge($packageConfig, $hostConfig)`, so a host's already-published `config/code-talker.php` — which predates this key — simply doesn't override it and the package default survives. Nesting the setting under an existing block instead (say `conversations.inertia_component`) would mean the host's published `conversations` array replaces the package's wholesale and the new subkey vanishes.
+
+Every read must carry an **inline default**. Laravel skips `mergeConfigFrom` entirely when the application's configuration is cached. A host that published its config before this key existed and then ran `config:cache` therefore has no `inertia` key at any level, and `config('code-talker.inertia.components.chat_bot')` returns `null` — a failure that appears only in production. `config(…, 'ai/ChatBot')` makes that unreachable, and is what every other nested read in `src/` already does.
+
 ### 4. TypeScript is typechecked in CI, and Node stays a dev-only concern
 
 A `package.json` with a single `typescript` devDependency and a `typecheck` script (`tsc --noEmit`), plus a CI job. Shipping `.ts` that has never been compiled would be worse than shipping nothing.
