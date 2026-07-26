@@ -397,6 +397,32 @@ exactly like one that does not, apart from taking longer.
 > Both are emitted today and both are part of the current contract. A future major
 > version may drop `status` in favour of `message_start` alone.
 
+### The other endpoints
+
+`GET {statusUrl}` and `POST {warmupUrl}` return JSON for model readiness — poll
+the first to disable the composer while a local model loads, and call the second
+to trigger a load:
+
+```json
+{
+  "status": {
+    "state": "loaded",
+    "provider": "lm-studio",
+    "model": "qwen3-8b",
+    "message": "Model is loaded and ready.",
+    "checked_at": "2026-07-27T10:15:00+00:00"
+  }
+}
+```
+
+`state` is `loaded`, `not_loaded`, or `unavailable`. The warmup response adds a
+`warmup_attempted` boolean. `GET /chats/statuses` returns the same status object
+for every bot at once, keyed by slug, as `{"statuses": {"my-bot": {…}}}`.
+
+`POST {resetUrl}` and `POST {switchUrl}` **redirect** rather than returning JSON —
+they are ordinary Inertia visits, not fetch calls. `switchUrl` expects a
+`conversation` field holding a `history[].handle`.
+
 ### Consuming the stream
 
 The published client wraps all of the above:

@@ -195,6 +195,20 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 __DIR__ . '/../routes/codetalker-admin.php' => base_path('routes/codetalker-admin.php'),
             ], 'code-talker-admin-routes');
 
+            // TypeScript declarations for the Inertia props and stream events.
+            // These track the package, so they are safe to re-publish on upgrade.
+            $this->publishes([
+                __DIR__ . '/../resources/js/types/code-talker.d.ts' => resource_path('js/types/code-talker.d.ts'),
+            ], 'code-talker-types');
+
+            // The stream client, plus the declarations it imports — publishing
+            // the client alone would leave that relative import dangling.
+            // Unlike the types, this is a starting point the host then owns.
+            $this->publishes([
+                __DIR__ . '/../resources/js/code-talker-stream.ts' => resource_path('js/code-talker-stream.ts'),
+                __DIR__ . '/../resources/js/types/code-talker.d.ts' => resource_path('js/types/code-talker.d.ts'),
+            ], 'code-talker-client');
+
             $this->commands([
                 BackfillAiSystemCapabilitiesCommand::class,
                 BackfillConversationUsageCommand::class,

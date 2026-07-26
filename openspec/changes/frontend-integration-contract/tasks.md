@@ -18,36 +18,36 @@
 
 ## 3. TypeScript toolchain
 
-- [ ] 3.1 Add a `package.json` (private, no runtime dependencies, `typescript` as the sole devDependency) with a `typecheck` script running `tsc --noEmit`
-- [ ] 3.2 Add a `tsconfig.json` in strict mode targeting a DOM lib, scoped to `resources/js`
-- [ ] 3.3 Add `node_modules` to `.gitignore`
-- [ ] 3.4 Add a `typecheck` job to `.github/workflows/tests.yml` that installs Node and runs the script, kept separate from the PHP matrix so a JS failure is legible on its own
+- [x] 3.1 Add a `package.json` (private, no runtime dependencies, `typescript` as the sole devDependency) with a `typecheck` script running `tsc --noEmit`
+- [x] 3.2 Add a `tsconfig.json` in strict mode targeting a DOM lib, scoped to `resources/js`
+- [x] 3.3 Add `node_modules` to `.gitignore`
+- [x] 3.4 Add a `typecheck` job to `.github/workflows/tests.yml` that installs Node and runs the script, kept separate from the PHP matrix so a JS failure is legible on its own
 
 ## 4. Published TypeScript types
 
-- [ ] 4.1 Create `resources/js/types/code-talker.d.ts` with the page prop interfaces: `ChatBotPageProps`, `ChatBotHashPageProps` (adding `chatHash`), `ChatBotsIndexProps`, plus `ChatMessage`, `ChatHistoryEntry`, `MessageBlock`, and `ChatBotSummary`
-- [ ] 4.2 Add the discriminated SSE union — `StatusEvent`, `MessageStartEvent`, `ContentBlockDeltaEvent`, `ReasoningBlockDeltaEvent`, `MessageDeltaEvent`, `MessageStopEvent`, `ErrorEvent` — as `ChatStreamEvent`, keyed on `type`, with `StopReason` and the `error` `reason` as string-literal unions
-- [ ] 4.3 Confirm exhaustiveness: write a throwaway `switch` over `ChatStreamEvent` with a `never` default and check it compiles without a catch-all, then delete it
-- [ ] 4.4 Register the `code-talker-types` publish tag in `CodeTalkerServiceProvider`, publishing to `resources/js/types/` in the host app
-- [ ] 4.5 Cross-check every declared field against the PHP that produces it — `ChatBotPagePayload`, `ChatBotIndexPayload`, `ConversationHistoryPresenter`, `StreamTranslator` — since a wrong type here is worse than no type
+- [x] 4.1 Create `resources/js/types/code-talker.d.ts` with the page prop interfaces: `ChatBotPageProps`, `ChatBotHashPageProps` (adding `chatHash`), `ChatBotsIndexProps`, plus `ChatMessage`, `ChatHistoryEntry`, `MessageBlock`, and `ChatBotSummary`
+- [x] 4.2 Add the discriminated SSE union — `StatusEvent`, `MessageStartEvent`, `ContentBlockDeltaEvent`, `ReasoningBlockDeltaEvent`, `MessageDeltaEvent`, `MessageStopEvent`, `ErrorEvent` — as `ChatStreamEvent`, keyed on `type`, with `StopReason` and the `error` `reason` as string-literal unions
+- [x] 4.3 Confirm exhaustiveness: write a throwaway `switch` over `ChatStreamEvent` with a `never` default and check it compiles without a catch-all, then delete it
+- [x] 4.4 Register the `code-talker-types` publish tag in `CodeTalkerServiceProvider`, publishing to `resources/js/types/` in the host app
+- [x] 4.5 Cross-check every declared field against the PHP that produces it — `ChatBotPagePayload`, `ChatBotIndexPayload`, `ConversationHistoryPresenter`, `StreamTranslator` — since a wrong type here is worse than no type
 
 ## 5. Published stream client
 
-- [ ] 5.1 Create `resources/js/client/code-talker-stream.ts` exporting `streamChatTurn(url, payload, callbacks)`, importing only browser APIs and the published types
-- [ ] 5.2 Implement the SSE read loop over `fetch` + `ReadableStream`, buffering partial chunks so an event split across reads is not dropped — the failure mode most likely to survive casual testing
-- [ ] 5.3 Dispatch `onStatus`, `onText`, `onReasoning`, `onDone`, and `onError` from the parsed events, and surface `X-Chat-Hash` through `onChatHash` as soon as headers arrive
-- [ ] 5.4 Return `{ abort(), done }` wired to an `AbortController`, so a cancelled turn stops firing callbacks while the server still persists its partial content
-- [ ] 5.5 Treat `[DONE]` as the terminator, and make a stream that ends without it (the `max_stream_duration` path) resolve rather than hang
-- [ ] 5.6 Ignore unrecognized event types rather than throwing, so a future additive event cannot break an old client
-- [ ] 5.7 Register the `code-talker-client` publish tag, publishing to `resources/js/` in the host app
-- [ ] 5.8 Run `npm run typecheck` and confirm it passes
-- [ ] 5.9 Document both publish commands in the README's Frontend Integration section, stating plainly that the client is a starting point the host owns after publishing, while the types are safe to re-publish on upgrade
+- [x] 5.1 Create `resources/js/code-talker-stream.ts` (**not** `client/` as planned — the package layout must mirror the published layout, or the client's relative `./types/code-talker` import breaks on publish) exporting `streamChatTurn(url, payload, callbacks)`, importing only browser APIs and the published types
+- [x] 5.2 Implement the SSE read loop over `fetch` + `ReadableStream`, buffering partial chunks so an event split across reads is not dropped — the failure mode most likely to survive casual testing
+- [x] 5.3 Dispatch `onStatus`, `onText`, `onReasoning`, `onDone`, and `onError` from the parsed events, and surface `X-Chat-Hash` through `onChatHash` as soon as headers arrive
+- [x] 5.4 Return `{ abort(), done }` wired to an `AbortController`, so a cancelled turn stops firing callbacks while the server still persists its partial content
+- [x] 5.5 Treat `[DONE]` as the terminator, and make a stream that ends without it (the `max_stream_duration` path) resolve rather than hang
+- [x] 5.6 Ignore unrecognized event types rather than throwing, so a future additive event cannot break an old client
+- [x] 5.7 Register the `code-talker-client` publish tag, publishing to `resources/js/` in the host app
+- [x] 5.8 Run `npm run typecheck` and confirm it passes
+- [x] 5.9 Document both publish commands in the README's Frontend Integration section, stating plainly that the client is a starting point the host owns after publishing, while the types are safe to re-publish on upgrade
 
 ## 6. Verification and wrap-up
 
-- [ ] 6.1 Add a PHP test asserting both new publish tags are registered and resolve to files that exist on disk
-- [ ] 6.2 Run `composer test` and confirm no regression against the current baseline
-- [ ] 6.3 Run `npm run typecheck` clean
-- [ ] 6.4 Walk the README's Frontend Integration section end to end as if implementing a UI from scratch, and confirm nothing requires opening package source
-- [ ] 6.5 Update `CLAUDE.md` to point at the documented contract as the source of truth for the wire format, replacing the bare "do not change it" note with a reference to the README section and the published types
-- [ ] 6.6 Add a CHANGELOG entry when the version is cut — a minor bump, since this is additive: new config keys with backward-compatible defaults, two new publish tags, no behavior change
+- [x] 6.1 Add a PHP test asserting both new publish tags are registered and resolve to files that exist on disk
+- [x] 6.2 Run `composer test` and confirm no regression against the current baseline
+- [x] 6.3 Run `npm run typecheck` clean
+- [x] 6.4 Walk the README's Frontend Integration section end to end as if implementing a UI from scratch, and confirm nothing requires opening package source — **found and filled a gap: the readiness/warmup JSON shapes and the fact that reset/switch redirect rather than return JSON**
+- [x] 6.5 Update `CLAUDE.md` to point at the documented contract as the source of truth for the wire format, replacing the bare "do not change it" note with a reference to the README section and the published types
+- [x] 6.6 Add a CHANGELOG entry when the version is cut — a minor bump, since this is additive: new config keys with backward-compatible defaults, two new publish tags, no behavior change — **folded into the existing unreleased 0.10.0 entry rather than opening 0.11.0, since 0.10.0 is untagged; also strengthened its breaking-change note, which understated the impact (the constructor change breaks *any* subclass, not only ones using the removed helpers)**

@@ -1,0 +1,11 @@
+{
+  "name": "@jvjvjv/code-talker",
+  "private": true,
+  "description": "Type declarations and stream client shipped with the jvjvjv/code-talker Laravel package. Host apps consume these via `php artisan vendor:publish`, not via npm.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2"
+  }
+}
