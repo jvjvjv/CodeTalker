@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.10.0] — 2026-07-27
+
+This release restructures the three largest classes in the package — `ChatBotController`, `AiChatBotConversationService`, and `SearchWebTool` — into focused collaborators without changing any behavior, and documents the previously undocumented contract between the package's HTTP surface and a host app's chat UI. Host apps that only consume the package's routes, services, and tools need to change nothing; the one exception is noted below.
+
+### Breaking Changes
+- `ChatBotController`'s constructor now takes ten dependencies instead of two, and its `protected` helper methods have been removed (`storedState`, `putStoredState`, `storedConversation`, `historyForBot`, `routeUrlFor`, `abortIfInaccessible`, `rememberConversation`, `clearStoredState`, `requestAccessPath`, `stateKey`, `forgetLegacyCookies`). **Any host app that subclasses this controller will fatal on instantiation**, whether or not it used those helpers, because a subclass calling `parent::__construct()` with the old two arguments no longer matches. Rather than chasing the new signature, override behavior by binding replacements for the extracted collaborators in `Jvjvjv\CodeTalker\Services\ChatBot\` — `ChatBotPagePayload`, `ChatBotIndexPayload`, `ChatBotStatusResolver`, `ConversationSessionStore`, `ChatBotAccessGuard`, `ChatBotRouteUrls`, and `ConversationHistoryPresenter` — which are resolved from the container and stay stable across future refactors.
+
+### New Features
+- The frontend contract is now documented under **Frontend Integration** in the README: every Inertia prop on both chat pages, every server-sent event with its payload and framing, the `[DONE]` terminator, the `X-Chat-Hash` header, and the readiness/warmup JSON shapes. Both contracts are declared public API covered by the package's version.
+- Added `php artisan vendor:publish --tag=code-talker-types`, publishing TypeScript declarations for the Inertia props and the stream event union.
+- Added `php artisan vendor:publish --tag=code-talker-client`, publishing a dependency-free TypeScript stream client that turns the SSE response into typed callbacks (`onText`, `onReasoning`, `onDone`, `onError`, …) with an abort handle. It imports nothing but browser APIs, so it works with any UI framework. No UI components are shipped.
+- Added `code-talker.inertia.components`, letting a host point the chat pages at its own Inertia components without subclassing the controller. Defaults to the previous `ai/ChatBot` and `ai/ChatBotsIndex`.
+- Chat-bot conversation logic is now available as separately usable services: `Services\ChatBot\` covers session state, access, route URLs, page payloads, and SSE streaming, and `Services\ChatBot\Conversation\` covers the turn runner, transcript, system prompt, and turn recording.
+- `search-web` engines are now individually addressable through the `Services\Mcp\Tools\ChatBot\SearchWeb\SearchEngine` contract, with one implementation per engine behind `SearchEngineRegistry`.
+
+### Bug Fixes
+- Corrected the README's description of conversation state, which still documented the per-bot `ai_chat_bot_conversations_{id}` cookie scheme replaced in 0.7.1.
+
 ## [0.9.2] — 2026-07-21
 
 This patch fixes the Fetch Web Page tool test so it matches the shared scraper user-agent helper instead of a stale hardcoded expectation.

@@ -38,3 +38,26 @@ jobs:
 
       - name: Run test suite
         run: composer test
+
+  # The published TypeScript is shipped to host apps, so it is typechecked here.
+  # Node is a development concern only — host apps install this package via
+  # Composer and never touch package.json.
+  typecheck:
+    runs-on: ubuntu-latest
+
+    name: TypeScript
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Typecheck published TypeScript
+        run: npm run typecheck

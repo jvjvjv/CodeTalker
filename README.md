@@ -69,6 +69,8 @@ and copy over only the new keys.
 | `reserved_slugs`                     | `[]`                                     | Additional slugs that cannot be used for root-path chatbots      |
 | `schedule`                           | `true`                                   | Set to `false` to disable the package's automatic scheduled jobs |
 | `conversations.idle_timeout_minutes` | `30`                                     | Inactivity before a conversation is marked `Completed`           |
+| `inertia.components.chat_bot`        | `ai/ChatBot`                             | Inertia component rendered for the chat page                     |
+| `inertia.components.chat_bots_index` | `ai/ChatBotsIndex`                       | Inertia component rendered for the bot list                      |
 
 ### Suggested host-app packages
 
@@ -260,7 +262,192 @@ Root-access-path bots duplicate the above at `/{slug}` instead of `/chat/{slug}`
 
 ### Conversation state
 
-The browser's active and historical conversations are stored in a session key and a 180-day encrypted cookie (`ai_chat_bot_conversations_{id}`). Conversations are also shareable via `/chat/{slug}/{hash}`.
+Per-bot conversation state — the current conversation and the switcher history — lives in the server-side session. Only the current conversation's id is mirrored into a single 180-day `ai_chat_bot_current` cookie, so the request header stays small no matter how many bots a visitor has used. History is capped at 25 entries and is never written to a cookie. Legacy per-bot `ai_chat_bot_conversations_{id}` cookies from before 0.7.1 are forgotten on sight. Conversations are also shareable via `/chat/{slug}/{hash}`.
+
+## Frontend Integration
+
+This package ships the chat **backend** — routes, streaming, persistence — and no UI
+components. You build the chat interface in your own framework and design system.
+What follows is the complete contract between the two, so you never need to read
+package source to do it.
+
+> **These contracts are public API.** The Inertia props and the SSE event shapes
+> below follow this package's semantic version: renaming a prop, changing an event
+> payload, or removing an event is a breaking change and is released as one.
+
+### Publishing types and a stream client
+
+```bash
+# TypeScript declarations for the props and stream events.
+# Safe to re-publish on upgrade — these track the package.
+php artisan vendor:publish --tag=code-talker-types
+
+# A dependency-free stream client. Copied into your app and yours to edit
+# from that point on; upgrades will not re-publish over your changes.
+php artisan vendor:publish --tag=code-talker-client
+```
+
+Both are optional. The client is a starting point, not a dependency — it imports
+nothing but standard browser APIs and works with React, Vue, Svelte, or none.
+
+### Inertia component names
+
+The two pages render `ai/ChatBot` and `ai/ChatBotsIndex` by default. Point them at
+your own component paths in `config/code-talker.php`:
+
+```php
+'inertia' => [
+    'components' => [
+        'chat_bot' => 'ai/ChatBot',
+        'chat_bots_index' => 'ai/ChatBotsIndex',
+    ],
+],
+```
+
+### Props: the chat page
+
+Rendered by `GET /chat/{slug}` and `GET /chat/{slug}/{hash}`.
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `bot.name` | `string` | |
+| `bot.description` | `string \| null` | |
+| `bot.require_visitor_identity` | `boolean` | Whether the bot asks anonymous visitors for a name and email |
+| `bot.total_cost_usd` | `number` | Lifetime spend across every conversation with this bot |
+| `messages` | `ChatMessage[]` | The visible transcript; the system prompt is never included |
+| `messages[].role` | `'user' \| 'assistant'` | |
+| `messages[].content` | `string` | |
+| `messages[].reasoning_content` | `string \| null` | Populated for reasoning models |
+| `messages[].blocks` | `MessageBlock[] \| null` | Ordered `{type: 'text' \| 'reasoning', content}` runs; `null` on older records |
+| `history` | `ChatHistoryEntry[]` | The conversation switcher |
+| `history[].handle` | `string` | Opaque id to POST to `switchUrl` |
+| `history[].label` | `string` | Conversation title, or `'New chat'` |
+| `history[].is_current` | `boolean` | |
+| `history[].is_stale` | `boolean` | No activity for 7 days |
+| `history[].updated_at` | `string` | Human-readable, e.g. `'3 hours ago'` |
+| `history[].cost_usd` | `number \| null` | |
+| `messageUrl` | `string` | POST here to send a message (SSE response) |
+| `resetUrl` | `string` | POST to start a new conversation |
+| `switchUrl` | `string` | POST a `conversation` handle to switch |
+| `statusUrl` | `string` | GET model readiness |
+| `warmupUrl` | `string` | POST to warm the model |
+| `chatUrl` | `string \| null` | Shareable link, `null` until the conversation has a hash |
+| `chatUrlBase` | `string` | e.g. `/chat/my-bot/`, for building links client-side |
+| `showIdentityForm` | `boolean` | Whether to collect a visitor name and email before the first message |
+| `chatHash` | `string \| null` | **Only present on `/chat/{slug}/{hash}`.** Absent from `/chat/{slug}` |
+
+`showIdentityForm` is derived differently on each route, deliberately. On
+`/chat/{slug}` it is true when there is no stored conversation at all; on
+`/chat/{slug}/{hash}` the conversation exists by definition, so it is true when
+that conversation has no non-system messages yet.
+
+### Props: the index page
+
+Rendered by `GET /chats`.
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `bots[].slug` | `string` | |
+| `bots[].name` | `string` | |
+| `bots[].description` | `string \| null` | |
+| `bots[].new_chat_url` | `string` | |
+| `bots[].status_url` | `string` | |
+| `bots[].conversations` | `array` | **Empty for guests** — only populated for an authenticated user |
+| `bots[].conversations[].title` | `string` | |
+| `bots[].conversations[].updated_at` | `string \| null` | ISO 8601 |
+| `bots[].conversations[].updated_at_human` | `string` | e.g. `'3 hours ago'` |
+| `bots[].conversations[].is_stale` | `boolean` | |
+
+### The message stream
+
+`POST {messageUrl}` responds with `text/event-stream`. Every frame is
+`data: <json>\n\n`. The response also carries an **`X-Chat-Hash`** header with the
+conversation's shareable hash — read it from the response headers to update the
+URL after the first message.
+
+| Event | Payload | Meaning |
+| --- | --- | --- |
+| `status` | `{phase, message}` | Progress before tokens arrive. `phase` is `request_received` then `model_loading` |
+| `message_start` | `{message: {usage: {input_tokens: null}}}` | The turn has begun. Sent exactly once |
+| `content_block_delta` | `{delta: {text}}` | Append `text` to the answer |
+| `reasoning_block_delta` | `{delta: {reasoning}}` | Append `reasoning` to the thinking trace |
+| `message_delta` | `{delta: {stop_reason}, usage: {input_tokens, output_tokens}}` | Terminal summary. `stop_reason` is `end_turn`, `max_tokens`, or `tool_use` |
+| `message_stop` | `{}` | The turn's content is complete |
+| `error` | `{message, reason?}` | The turn failed. See below |
+
+A turn that finishes normally ends with the literal sentinel:
+
+```
+data: [DONE]
+
+```
+
+**An error frame is terminal on its own — `[DONE]` does not follow it.** Treat any
+`error` as the end of the turn rather than waiting for a sentinel that never
+arrives. `reason` is `max_stream_duration` when the wall-clock guard cut the turn
+off, `provider_error` for a provider failure, and absent for a recoverable
+in-stream error or a transport-level failure. Content already delivered via
+`content_block_delta` before the error is still valid and is persisted server-side
+— do not discard it.
+
+Tool calls are never forwarded to the browser. A turn that uses tools looks
+exactly like one that does not, apart from taking longer.
+
+> **Known wart:** the `status` frames predate `message_start` and overlap with it.
+> Both are emitted today and both are part of the current contract. A future major
+> version may drop `status` in favour of `message_start` alone.
+
+### The other endpoints
+
+`GET {statusUrl}` and `POST {warmupUrl}` return JSON for model readiness — poll
+the first to disable the composer while a local model loads, and call the second
+to trigger a load:
+
+```json
+{
+  "status": {
+    "state": "loaded",
+    "provider": "lm-studio",
+    "model": "qwen3-8b",
+    "message": "Model is loaded and ready.",
+    "checked_at": "2026-07-27T10:15:00+00:00"
+  }
+}
+```
+
+`state` is `loaded`, `not_loaded`, or `unavailable`. The warmup response adds a
+`warmup_attempted` boolean. `GET /chats/statuses` returns the same status object
+for every bot at once, keyed by slug, as `{"statuses": {"my-bot": {…}}}`.
+
+`POST {resetUrl}` and `POST {switchUrl}` **redirect** rather than returning JSON —
+they are ordinary Inertia visits, not fetch calls. `switchUrl` expects a
+`conversation` field holding a `history[].handle`.
+
+### Consuming the stream
+
+The published client wraps all of the above:
+
+```ts
+import { streamChatTurn } from './code-talker-stream';
+
+const turn = streamChatTurn(props.messageUrl, { message: 'Hello' }, {
+    onChatHash: (hash) => history.replaceState(null, '', props.chatUrlBase + hash),
+    onStatus: (phase) => setPhase(phase),
+    onText: (delta) => setAnswer((prev) => prev + delta),
+    onReasoning: (delta) => setThinking((prev) => prev + delta),
+    onDone: ({ stopReason, usage }) => setDone(stopReason, usage),
+    onError: ({ message, reason }) => setError(message, reason),
+});
+
+// Cancel mid-turn. The server still persists whatever was generated.
+turn.abort();
+
+await turn.done;
+```
+
+If the bot has `require_visitor_identity` and the visitor is not authenticated,
+send `name` and `email` alongside `message` on the first request of a
+conversation.
 
 ## Tool Registration
 
