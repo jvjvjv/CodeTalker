@@ -232,9 +232,19 @@ class SearchWebToolTest extends TestCase
         );
     }
 
+    public function test_search_service_config_exposes_provider_defaults(): void {
+        $config = require __DIR__ . '/../../config/code-talker.php';
+
+        $this->assertSame('', $config['services']['brave']['search_api_key']);
+        $this->assertSame('', $config['services']['bing']['search_api_key']);
+        $this->assertSame('https://api.bing.microsoft.com/v7.0/search', $config['services']['bing']['endpoint']);
+        $this->assertSame('', $config['services']['google']['search_api_key']);
+        $this->assertSame('', $config['services']['google']['search_engine_id']);
+    }
+
     public function test_engine_api_keys_switch_the_fetch_strategy(): void
     {
-        config()->set('services.brave.search_api_key', 'brave-key');
+        config()->set('code-talker.services.brave.search_api_key', 'brave-key');
 
         Http::fake([
             'https://api.search.brave.com/*' => Http::response([

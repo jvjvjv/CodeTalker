@@ -25,7 +25,7 @@ final class BingSearchEngine implements SearchEngine
 
     public function search(SearchQuery $query): EngineResults
     {
-        $apiKey = trim((string) config('services.bing.search_api_key', env('BING_SEARCH_API_KEY', '')));
+        $apiKey = trim((string) config('code-talker.services.bing.search_api_key', ''));
 
         return $apiKey !== ''
             ? $this->searchViaApi($query, $apiKey)
@@ -34,7 +34,7 @@ final class BingSearchEngine implements SearchEngine
 
     private function searchViaApi(SearchQuery $query, string $apiKey): EngineResults
     {
-        $endpoint = rtrim((string) config('services.bing.endpoint', env('BING_SEARCH_ENDPOINT', self::DEFAULT_API_ENDPOINT)), '/');
+        $endpoint = rtrim((string) config('code-talker.services.bing.endpoint', self::DEFAULT_API_ENDPOINT), '/');
 
         $response = $this->http->api()
             ->withHeaders(['Ocp-Apim-Subscription-Key' => $apiKey])

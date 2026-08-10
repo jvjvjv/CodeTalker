@@ -25,7 +25,7 @@ final class BraveSearchEngine implements SearchEngine
 
     public function search(SearchQuery $query): EngineResults
     {
-        $apiKey = trim((string) config('services.brave.search_api_key', env('BRAVE_SEARCH_API_KEY', '')));
+        $apiKey = trim((string) config('code-talker.services.brave.search_api_key', ''));
 
         return $apiKey !== ''
             ? $this->searchViaApi($query, $apiKey)

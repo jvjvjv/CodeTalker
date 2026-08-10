@@ -72,6 +72,20 @@ return [
         ],
     ],
 
+    'services' => [
+        'brave' => [
+            'search_api_key' => env('BRAVE_SEARCH_API_KEY', ''),
+        ],
+        'bing' => [
+            'search_api_key' => env('BING_SEARCH_API_KEY', ''),
+            'endpoint' => env('BING_SEARCH_ENDPOINT', 'https://api.bing.microsoft.com/v7.0/search'),
+        ],
+        'google' => [
+            'search_api_key' => env('GOOGLE_SEARCH_API_KEY', ''),
+            'search_engine_id' => env('GOOGLE_SEARCH_ENGINE_ID', ''),
+        ],
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Conversations
