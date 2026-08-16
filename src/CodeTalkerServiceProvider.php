@@ -13,6 +13,7 @@ use Jvjvjv\CodeTalker\Mcp\Servers\CodeTalkerServer;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Observers\AiConversationObserver;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
+use Jvjvjv\CodeTalker\Services\Conversation\CodeTalkerConversationStore;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AiSystemProviderConfigurator;
 use Jvjvjv\CodeTalker\Services\ProviderModelsClient;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeContext;
@@ -22,6 +23,7 @@ use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Ai\Contracts\ConversationStore;
 use Laravel\Mcp\Facades\Mcp;
 
 class CodeTalkerServiceProvider extends ServiceProvider
@@ -109,6 +111,12 @@ class CodeTalkerServiceProvider extends ServiceProvider
         $this->app->singleton(ProviderModelsClient::class);
         $this->app->singleton(RawExchangeContext::class);
         $this->app->singleton(RawExchangeRecorder::class);
+
+        // Replace laravel/ai's own conversation store so an agent resumed onto a
+        // conversation replays this package's history — with tool calls, tool
+        // results, and attachments intact — rather than the framework's tables,
+        // which this package never writes to.
+        $this->app->singleton(ConversationStore::class, CodeTalkerConversationStore::class);
 
         // Default ToolContext used when a tool is resolved outside the local chat
         // loop — primarily the external MCP server, where the authenticated caller

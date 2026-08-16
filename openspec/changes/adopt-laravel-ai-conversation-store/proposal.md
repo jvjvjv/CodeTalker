@@ -20,19 +20,19 @@ Verified: the `RememberConversation` middleware is attached in `gatherMiddleware
 - **`CodeTalkerAgent`** uses the `RemembersConversations` trait and implements the matching contract. Its existing `messages()` and `append()` need deliberate reconciliation — the trait supplies its own `messages()` that reads from the store, and a class method silently wins over a trait method.
 - **A migration** adds the columns the contract needs on `ai_conversation_messages`: `attachments`, `tool_calls`, `tool_results`, `usage`, and `agent`. The table currently has only `role`, `content`, `reasoning_content`, `blocks`, `metadata`, `created_at`.
 - **`TranscriptBuilder` and `ConversationTranscript` are deleted.** History replay comes from the store.
-- **`TurnRecorder` is refactored** to enrich the message row the store writes, rather than creating its own.
+- **`TurnRecorder` keeps ownership of writes** and additionally persists tool calls, tool results, and usage so its rows are replayable. See `design.md` — the spike ruled out middleware-driven persistence.
 
 ## Risks
 
 Four, in descending order of how much they could derail the change.
 
-**1. `AgentResponse` has no reasoning field.** It carries `text`, `usage`, and `meta` only. `TurnRecorder` currently persists `reasoning_content` and `blocks`, and reasoning streaming for openai-compatible providers was a deliberate 0.8.0 bug fix. If the store's `storeAssistantMessage()` becomes the sole writer, reasoning is lost — a silent regression against a shipped feature. Mitigation: the store records the id of the row it just wrote, and `TurnRecorder` enriches that row with `reasoning_content` and `blocks` instead of inserting its own. **This needs a spike before the rest of the change is planned in detail** — if the enrichment point turns out not to exist, the write path stays with `TurnRecorder` and only the read path is adopted.
+**1. ~~The write path~~ — RESOLVED BY SPIKE; see `design.md`.** Middleware-driven persistence is not viable: `RememberConversation` runs as a `then()` callback that fires only after the stream generator is fully consumed, and `ConversationTurnRunner` deliberately breaks out of that loop on client abort and on the max-duration guard. On either path nothing would be persisted at all — silently regressing the 0.9.0 fix that keeps partial output from a timed-out turn. The read path is adopted; `TurnRecorder` remains the writer.
 
-**2. Double writes.** The `RememberConversation` middleware writes both the user and assistant message. `AiChatBotConversationService` and `TurnRecorder` also write them. Without care every turn is persisted twice.
+**2. Double writes.** Avoided by construction: the package sets the conversation id without a participant, and the middleware only attaches when a participant is present. A host that opts into `continue($id, $user)` while also driving the chat service would get both writers — documented, not prevented.
 
-**3. Anonymous visitors.** The middleware only attaches when `hasConversationParticipant()` is true, i.e. `conversationUser !== null`, and `continueLastConversation()` reads `$as->id`. Public unauthenticated chat is this package's whole differentiator, so visitors need a lightweight participant object exposing an `id` — likely derived from `visitor_email`. Confirm the middleware tolerates it before committing.
+**3. Anonymous visitors.** Moot for the package's own path, which never sets a participant. Still relevant to hosts calling `continue()` directly, where an object exposing an `id` is required.
 
-**4. Title generation costs a provider call.** `RememberConversation::generateTitle()` calls `cheapestTextModel()` unless `ai.conversations.generate_title` is false. Code Talker already has `ConversationTitle::fromUserMessage()`, which makes no call. The config must be set, or every new conversation silently pays for an extra request.
+**4. Title generation costs a provider call.** Only reachable through the write middleware, so it does not affect the package's path. Documented for hosts using `continue()`: set `ai.conversations.generate_title` to false, or every new conversation silently pays for an extra request on top of `ConversationTitle::fromUserMessage()`.
 
 ## Capabilities
 
@@ -42,7 +42,7 @@ Four, in descending order of how much they could derail the change.
 
 ### Modified Capabilities
 
-- Conversation persistence moves from `TurnRecorder` owning the write to the store owning it, with `TurnRecorder` enriching. The `ai_conversation_messages` schema grows.
+- History replay moves from `TranscriptBuilder` to the store, gaining tool calls, tool results, and attachments. Writes stay with `TurnRecorder`, which now also persists that structure so its rows are replayable. The `ai_conversation_messages` schema grows.
 
 ## Impact
 

@@ -199,6 +199,44 @@ tool use, structured output — applies. Prior versions returned an
 
 Map a feature key to a default `AiSystem` via the `ai_system_feature_defaults` table (managed through `AiSystemManager`). This decouples application code from specific system IDs.
 
+## Conversation History
+
+The package implements `Laravel\Ai\Contracts\ConversationStore` over its own
+tables and binds it over the framework default, so an agent resumed onto a
+conversation replays Code Talker's history — including tool calls, tool results,
+and attachments, none of which a transcript rebuilt from message text can carry.
+
+```php
+$agent = $factory->forSystem($system)->continue((string) $conversation->id, $user);
+```
+
+Conversations must already exist. `storeConversation()` throws, because a Code
+Talker conversation requires an `AiSystem` that the contract gives no way to
+supply — open one with `AiChatBotConversationService::startConversation()` first.
+
+### Two writers
+
+`continue()` attaches a conversation participant, which arms laravel/ai's
+remembering middleware. That middleware persists both messages of a turn. If you
+*also* drive `AiChatBotConversationService`, every turn is written twice.
+
+The package's own chat flow avoids this by resuming without a participant:
+
+```php
+$agent->withStoredConversation((string) $conversation->id);
+```
+
+That replays history but leaves the middleware disarmed, so `TurnRecorder`
+remains the only writer. This is deliberate rather than incidental: the
+middleware persists from a callback that fires only once the stream is fully
+consumed, and a turn cut short by a client disconnect or the duration guard never
+gets there — so the middleware would silently discard partial output that
+`TurnRecorder` keeps.
+
+If you use `continue()` directly, also set `ai.conversations.generate_title` to
+`false` unless you want a second provider call per new conversation for a title
+the package already derives locally.
+
 ## Chat Bots
 
 An `AiChatBot` defines a user-facing persona. Create one with `AiChatBotManager`. Key fields:

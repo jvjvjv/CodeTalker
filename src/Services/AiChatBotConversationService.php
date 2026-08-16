@@ -12,7 +12,7 @@ use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\ConversationTurnRunner;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\RequestPayloadBuilder;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\ResponseBlocks;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\SystemPromptBuilder;
-use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TranscriptBuilder;
+use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\ConversationHistory;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnGuards;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnRecorder;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnRequestPayload;
@@ -27,7 +27,7 @@ class AiChatBotConversationService
 {
     private SystemPromptBuilder $systemPrompts;
 
-    private TranscriptBuilder $transcripts;
+    private ConversationHistory $history;
 
     private ConversationTitle $titles;
 
@@ -50,7 +50,7 @@ class AiChatBotConversationService
         // constructor arguments, so this signature stays as host apps and tests
         // construct it.
         $this->systemPrompts = new SystemPromptBuilder($memoryService);
-        $this->transcripts = new TranscriptBuilder();
+        $this->history = new ConversationHistory(app(\Laravel\Ai\Contracts\ConversationStore::class));
         $this->titles = new ConversationTitle();
         $this->turns = new TurnSequence();
         $this->payloads = new RequestPayloadBuilder();
@@ -103,7 +103,12 @@ class AiChatBotConversationService
     {
         $conversation->loadMissing(['aiSystem', 'aiChatBot', 'messages']);
 
-        $userMessageRecord = AiConversationMessage::create([
+        // Read history before persisting the incoming message: that message
+        // becomes the prompt, so replaying it as history too would send it twice.
+        $systemPrompt = $this->history->systemPromptFor($conversation);
+        $history = $this->history->historyFor($conversation);
+
+        AiConversationMessage::create([
             'ai_conversation_id' => $conversation->id,
             'role' => 'user',
             'content' => $userMessage,
@@ -115,8 +120,6 @@ class AiChatBotConversationService
             ])->save();
         }
 
-        $transcript = $this->transcripts->build($conversation, $userMessageRecord);
-
         $system = $conversation->aiSystem;
         $turnNumber = $this->turns->nextFor($conversation);
         $startTime = microtime(true);
@@ -126,8 +129,8 @@ class AiChatBotConversationService
             $system->model,
             $system->max_tokens,
             $temperature,
-            $transcript->systemPrompt,
-            $transcript->history,
+            $systemPrompt,
+            $history,
             $userMessage,
         ));
 
@@ -137,8 +140,8 @@ class AiChatBotConversationService
         try {
             $agent = $this->agentFactory->forSystem(
                 $system,
-                instructions: $transcript->systemPrompt ?? '',
-                messages: $transcript->history,
+                instructions: $systemPrompt ?? '',
+                messages: $history,
                 tools: $this->toolsFor($conversation),
                 temperature: $temperature,
             );
@@ -159,7 +162,7 @@ class AiChatBotConversationService
                 $userMessage,
                 $turnNumber,
                 $startTime,
-                $transcript->systemPrompt,
+                $systemPrompt,
             );
 
             $this->turnRecorder->recordCompletedTurn(
