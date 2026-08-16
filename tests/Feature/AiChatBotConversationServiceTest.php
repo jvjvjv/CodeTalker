@@ -13,6 +13,7 @@ use Jvjvjv\CodeTalker\Models\AiInteractionLog;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\AiChatBotConversationService;
+use Jvjvjv\CodeTalker\Services\ChatBot\SseFrameEncoder;
 use Jvjvjv\CodeTalker\Services\AiMemoryService;
 use Jvjvjv\CodeTalker\Services\ConversationUsageService;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
@@ -87,13 +88,18 @@ class AiChatBotConversationServiceTest extends TestCase
     }
 
     /**
+     * The service yields structured events now; the documented wire format is
+     * produced by SseFrameEncoder. Piping the stream through it here keeps every
+     * assertion below — on the events and on the raw lines — meaningful, and
+     * means the encoder is covered by the same characterization tests.
+     *
      * @return array<int, array<string, mixed>> decoded JSON events, excluding [DONE]
      */
     private function drainAndDecode(iterable $stream, array &$rawLines = []): array
     {
         $events = [];
 
-        foreach ($stream as $line) {
+        foreach ((new SseFrameEncoder())->encode($stream) as $line) {
             $rawLines[] = $line;
 
             $payload = trim(str_replace('data: ', '', $line));

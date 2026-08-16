@@ -2,7 +2,6 @@
 
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
-use Inertia\Inertia;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
@@ -15,10 +14,17 @@ use Jvjvjv\CodeTalker\Tests\TestCase;
 
 class PackageSmokeTest extends TestCase
 {
-    public function test_it_registers_the_expected_package_routes(): void
+    /**
+     * The package is a library now: hosts own their routes entirely.
+     */
+    public function test_it_registers_no_routes(): void
     {
-        $this->assertTrue(Route::has('chat-bots.index'));
-        $this->assertTrue(Route::has('chat-bots.chat.show'));
+        $packageRoutes = collect(Route::getRoutes()->getRoutesByName())
+            ->keys()
+            ->filter(fn (string $name): bool => str_starts_with($name, 'chat-bots.')
+                || str_starts_with($name, 'admin.ai.'));
+
+        $this->assertCount(0, $packageRoutes);
     }
 
     /**
@@ -43,11 +49,6 @@ class PackageSmokeTest extends TestCase
         $this->assertSame($first, $second);
     }
 
-    public function test_inertia_is_available_to_package_controllers(): void
-    {
-        $this->assertTrue(class_exists(Inertia::class));
-    }
-
     /**
      * Every manager has to be container-resolvable, since that is how a host app
      * gets one — none of them are bound explicitly.
@@ -65,28 +66,26 @@ class PackageSmokeTest extends TestCase
         }
     }
 
-    public function test_it_registers_publishable_route_files(): void
+    public function test_the_route_publish_tags_are_gone(): void
     {
-        $publishGroups = ServiceProvider::pathsToPublish(
-            provider: \Jvjvjv\CodeTalker\CodeTalkerServiceProvider::class,
-            group: 'code-talker-routes',
-        );
-
-        $this->assertContains(base_path('routes/codetalker-chatbots.php'), $publishGroups);
-
-        $publishedSources = array_flip($publishGroups);
-
-        $this->assertStringEndsWith(
-            '/routes/codetalker-chatbots.php',
-            $publishedSources[base_path('routes/codetalker-chatbots.php')],
-        );
+        foreach (['code-talker-routes', 'code-talker-chatbot-routes', 'code-talker-admin-routes'] as $tag) {
+            $this->assertSame([], ServiceProvider::pathsToPublish(
+                provider: \Jvjvjv\CodeTalker\CodeTalkerServiceProvider::class,
+                group: $tag,
+            ), "Publish tag [{$tag}] should no longer exist.");
+        }
     }
 
-    public function test_the_admin_route_publish_tag_is_gone(): void
+    /**
+     * The frontend contract survives the HTTP removal as an opt-in helper.
+     */
+    public function test_the_frontend_publish_tags_survive(): void
     {
-        $this->assertSame([], ServiceProvider::pathsToPublish(
-            provider: \Jvjvjv\CodeTalker\CodeTalkerServiceProvider::class,
-            group: 'code-talker-admin-routes',
-        ));
+        foreach (['code-talker-types', 'code-talker-client'] as $tag) {
+            $this->assertNotEmpty(ServiceProvider::pathsToPublish(
+                provider: \Jvjvjv\CodeTalker\CodeTalkerServiceProvider::class,
+                group: $tag,
+            ), "Publish tag [{$tag}] should still exist.");
+        }
     }
 }

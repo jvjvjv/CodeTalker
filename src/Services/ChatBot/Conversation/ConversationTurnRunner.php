@@ -196,7 +196,7 @@ class ConversationTurnRunner
                             $blocks->append('reasoning', $browserEvent['delta']['reasoning']);
                         }
 
-                        yield 'data: ' . json_encode($browserEvent) . "\n\n";
+                        yield $browserEvent;
                     }
                 }
             } finally {

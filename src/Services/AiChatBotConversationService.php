@@ -3,6 +3,7 @@
 namespace Jvjvjv\CodeTalker\Services;
 
 use Generator;
+use RuntimeException;
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
 use Jvjvjv\CodeTalker\Models\AiChatBot;
 use Jvjvjv\CodeTalker\Models\AiConversation;
@@ -30,6 +31,9 @@ class AiChatBotConversationService
     private ConversationHistory $history;
 
     private ConversationTitle $titles;
+
+    /** @var (callable(): bool)|null */
+    private $cancellationCheck = null;
 
     private TurnSequence $turns;
 
@@ -63,8 +67,28 @@ class AiChatBotConversationService
         );
     }
 
+    /**
+     * Open a conversation with a bot.
+     *
+     * The two guards here used to live in the controller. They are enforced at
+     * the service now so a host writing its own controller cannot lose them:
+     * an inactive bot is not a chattable bot, and a bot that requires visitor
+     * identity has no way to attribute a conversation without one.
+     *
+     * @throws RuntimeException if the bot is inactive or required identity is missing
+     */
     public function startConversation(AiChatBot $bot, mixed $user = null, ?string $visitorName = null, ?string $visitorEmail = null): AiConversation
     {
+        if (! $bot->is_active) {
+            throw new RuntimeException("The chat bot '{$bot->slug}' is not active.");
+        }
+
+        if ($bot->require_visitor_identity && (blank($visitorName) || blank($visitorEmail))) {
+            throw new RuntimeException(
+                "The chat bot '{$bot->slug}' requires a visitor name and email."
+            );
+        }
+
         $conversation = AiConversation::create([
             'user_id' => $user?->id,
             'ai_system_id' => $bot->ai_system_id,
@@ -92,16 +116,25 @@ class AiChatBotConversationService
     /**
      * Continue a bot conversation by streaming the assistant response.
      *
-     * Yields SSE lines ("data: {...}\n\n") in the same Anthropic-shaped wire
-     * format the browser chat UI has always consumed, ending with
-     * "data: [DONE]\n\n". laravel/ai owns the provider call and the tool loop;
-     * this method owns persistence, logging, and the browser stream.
+     * Yields structured events in the same Anthropic-shaped vocabulary the
+     * documented stream has always used — `status`, `message_start`,
+     * `content_block_delta`, `reasoning_block_delta`, `message_delta`,
+     * `message_stop`, `error` — leaving the choice of transport to the caller.
+     * Pass them through SseFrameEncoder to reproduce the previous wire format.
      *
-     * @return Generator<int, string>
+     * laravel/ai owns the provider call and the tool loop; this method owns
+     * persistence and logging.
+     *
+     * @return Generator<int, array<string, mixed>>
      */
     public function continueConversation(AiConversation $conversation, string $userMessage): Generator
     {
         $conversation->loadMissing(['aiSystem', 'aiChatBot', 'messages']);
+
+        // The controller used to do this on every message. It is not just a
+        // header value — it migrates a stale hash — so it moves here rather
+        // than becoming the host's job to remember.
+        $conversation->generateChatHash();
 
         // Read history before persisting the incoming message: that message
         // becomes the prompt, so replaying it as history too would send it twice.
@@ -146,11 +179,11 @@ class AiChatBotConversationService
                 temperature: $temperature,
             );
 
-            yield 'data: ' . json_encode([
+            yield [
                 'type' => 'status',
                 'phase' => 'model_loading',
                 'message' => 'Waiting for model response...',
-            ]) . "\n\n";
+            ];
 
             $outcome = yield from $this->turnRunner->run(
                 $conversation,
@@ -176,20 +209,18 @@ class AiChatBotConversationService
             if ($outcome->maxDurationExceeded) {
                 // Still surfaced to the browser as a failure — the guard genuinely
                 // cut the turn off — but the content above is no longer lost.
-                yield 'data: ' . json_encode([
+                yield [
                     'type' => 'error',
                     'message' => $outcome->maxDurationMessage,
                     'reason' => 'max_stream_duration',
-                ]) . "\n\n";
+                ];
 
                 return;
             }
 
             foreach ($translator->finish() as $browserEvent) {
-                yield 'data: ' . json_encode($browserEvent) . "\n\n";
+                yield $browserEvent;
             }
-
-            yield "data: [DONE]\n\n";
         } catch (\Throwable $exception) {
             // The max-stream-duration guard no longer throws (it stops the
             // turn like a client abort so partial content is preserved, see
@@ -204,11 +235,11 @@ class AiChatBotConversationService
                 $startTime,
             );
 
-            yield 'data: ' . json_encode([
+            yield [
                 'type' => 'error',
                 'message' => $exception->getMessage(),
                 'reason' => 'provider_error',
-            ]) . "\n\n";
+            ];
         }
     }
 
@@ -222,13 +253,35 @@ class AiChatBotConversationService
     }
 
     /**
-     * Whether the browser has hung up on the streaming response (Cancel/ESC).
-     * Extracted so tests can drive the client-abort guard deterministically.
-     * PHP only flips this flag once output is flushed to the dead connection,
-     * so the controller sets ignore_user_abort(true) and keeps flushing.
+     * Supply the signal that cancels an in-flight turn.
+     *
+     * The default suits a web request, where the browser hanging up is the
+     * signal. It is useless anywhere else — connection_aborted() reports 0 in
+     * CLI and queue contexts, so the guard would silently never fire — hence a
+     * host driving a turn outside a request should supply its own.
+     *
+     * @param callable(): bool $check
+     */
+    public function usingCancellationCheck(callable $check): static
+    {
+        $this->cancellationCheck = $check;
+
+        return $this;
+    }
+
+    /**
+     * Whether the turn has been cancelled.
+     *
+     * PHP only flips connection_aborted() once output has been flushed to the
+     * dead connection, so a host streaming over HTTP must set
+     * ignore_user_abort(true) and keep flushing for the default to work.
      */
     protected function clientAborted(): bool
     {
+        if ($this->cancellationCheck !== null) {
+            return ($this->cancellationCheck)();
+        }
+
         return connection_aborted() !== 0;
     }
 

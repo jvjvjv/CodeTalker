@@ -20,7 +20,8 @@ return [
     | Route Middleware
     |--------------------------------------------------------------------------
     |
-    | Middleware applied to the public chat routes and admin AI routes.
+    | Retained for host apps still loading a published copy of a removed
+    | package route file. The package registers no routes of its own.
     |
     */
 
@@ -71,25 +72,6 @@ return [
     */
 
     'schedule' => true,
-
-    /*
-    |--------------------------------------------------------------------------
-    | Inertia Components
-    |--------------------------------------------------------------------------
-    |
-    | The Inertia components the public chat pages render. Point these at your
-    | own component paths if your app does not use the defaults; the props
-    | passed to them are unchanged either way, and are documented under
-    | "Frontend Integration" in the README.
-    |
-    */
-
-    'inertia' => [
-        'components' => [
-            'chat_bot' => 'ai/ChatBot',
-            'chat_bots_index' => 'ai/ChatBotsIndex',
-        ],
-    ],
 
     'services' => [
         'brave' => [

@@ -25,7 +25,6 @@
     "laravel/framework": "^12.62 || ^13.15",
     "laravel/ai": "^0.9",
     "guzzlehttp/guzzle": "^7.0",
-    "inertiajs/inertia-laravel": "^2.0 || ^3.0",
     "symfony/dom-crawler": "^7.4 || ^8.1",
     "laravel/mcp": "^0.8.1"
   },
