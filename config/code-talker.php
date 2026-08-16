@@ -26,6 +26,12 @@ return [
 
     'middleware' => ['web'],
 
+    /*
+    | The package no longer registers admin routes. This key is retained for
+    | host apps still loading a published copy of the old admin route file,
+    | which reads it. New admin screens should declare their own middleware.
+    */
+
     'admin_middleware' => ['web', 'auth', 'can:manage-ai-tools'],
 
     /*
@@ -40,6 +46,19 @@ return [
     */
 
     'reserved_slugs' => [],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Feature Keys
+    |--------------------------------------------------------------------------
+    |
+    | The feature keys an AiSystem may be made the default for. Leave empty to
+    | accept any non-empty string. Populate it to have the management services
+    | validate feature defaults against a known list.
+    |
+    */
+
+    'feature_keys' => [],
 
     /*
     |--------------------------------------------------------------------------

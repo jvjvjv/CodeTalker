@@ -149,10 +149,6 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 $this->loadRoutesFrom($this->routeFilePath('codetalker-chatbots.php'));
             }
 
-            if (! Route::has('admin.ai.index')) {
-                $this->loadRoutesFrom($this->routeFilePath('codetalker-admin.php'));
-            }
-
             $this->registerMcpServers();
         });
 
@@ -184,16 +180,11 @@ class CodeTalkerServiceProvider extends ServiceProvider
 
             $this->publishes([
                 __DIR__ . '/../routes/codetalker-chatbots.php' => base_path('routes/codetalker-chatbots.php'),
-                __DIR__ . '/../routes/codetalker-admin.php' => base_path('routes/codetalker-admin.php'),
             ], 'code-talker-routes');
 
             $this->publishes([
                 __DIR__ . '/../routes/codetalker-chatbots.php' => base_path('routes/codetalker-chatbots.php'),
             ], 'code-talker-chatbot-routes');
-
-            $this->publishes([
-                __DIR__ . '/../routes/codetalker-admin.php' => base_path('routes/codetalker-admin.php'),
-            ], 'code-talker-admin-routes');
 
             // TypeScript declarations for the Inertia props and stream events.
             // These track the package, so they are safe to re-publish on upgrade.

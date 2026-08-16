@@ -1,6 +1,6 @@
 # code-talker
 
-Multi-provider AI communications package for Laravel — chatbots, streaming, tool-use, memory, and admin management.
+Multi-provider AI communications package for Laravel — chatbots, streaming, tool-use, memory, and management services.
 
 ## Requirements
 
@@ -20,7 +20,7 @@ composer require jvjvjv/code-talker
 ```
 
 The package installs the Laravel Inertia adapter as a runtime dependency because
-its public and admin controllers render Inertia responses.
+its public chat controllers render Inertia responses.
 
 Publish the config and migrations, then run them:
 
@@ -65,8 +65,9 @@ and copy over only the new keys.
 | ------------------------------------ | ---------------------------------------- | ---------------------------------------------------------------- |
 | `user_model`                         | `App\Models\User::class`                 | Eloquent model used for authenticated users                      |
 | `middleware`                         | `['web']`                                | Middleware applied to public chat routes                         |
-| `admin_middleware`                   | `['web', 'auth', 'can:manage-ai-tools']` | Middleware applied to admin routes                               |
+| `admin_middleware`                   | `['web', 'auth', 'can:manage-ai-tools']` | Retained for host apps using a published copy of the old admin routes |
 | `reserved_slugs`                     | `[]`                                     | Additional slugs that cannot be used for root-path chatbots      |
+| `feature_keys`                       | `[]`                                     | Valid feature keys for system defaults; empty accepts any string |
 | `schedule`                           | `true`                                   | Set to `false` to disable the package's automatic scheduled jobs |
 | `conversations.idle_timeout_minutes` | `30`                                     | Inactivity before a conversation is marked `Completed`           |
 | `inertia.components.chat_bot`        | `ai/ChatBot`                             | Inertia component rendered for the chat page                     |
@@ -74,7 +75,7 @@ and copy over only the new keys.
 
 ### Suggested host-app packages
 
-- `bspdx/keystone` is suggested if you want a ready-made host-app authorization layer for the package's admin AI routes.
+- `bspdx/keystone` is suggested if you want a ready-made host-app authorization layer around your own admin screens.
 
 ### Provider environment variables
 
@@ -146,7 +147,7 @@ by the model-status / readiness check (and cloud-provider chat also 404s) for
 
 ## AI Systems
 
-An `AiSystem` record represents a fully configured provider endpoint. Create one through the admin UI at `/admin/ai/systems` or via a seeder. Key fields:
+An `AiSystem` record represents a fully configured provider endpoint. Create one with `AiSystemManager` (see **Management Services**) or via a seeder. Key fields:
 
 | Field              | Description                                                                       |
 | ------------------ | --------------------------------------------------------------------------------- |
@@ -196,11 +197,11 @@ tool use, structured output — applies. Prior versions returned an
 
 ### Feature defaults
 
-Map a feature key to a default `AiSystem` via the `ai_system_feature_defaults` table (managed through `/admin/ai/systems`). This decouples application code from specific system IDs.
+Map a feature key to a default `AiSystem` via the `ai_system_feature_defaults` table (managed through `AiSystemManager`). This decouples application code from specific system IDs.
 
 ## Chat Bots
 
-An `AiChatBot` defines a user-facing persona. Create one at `/admin/ai/chat-bots`. Key fields:
+An `AiChatBot` defines a user-facing persona. Create one with `AiChatBotManager`. Key fields:
 
 | Field                      | Description                                          |
 | -------------------------- | ---------------------------------------------------- |
@@ -236,7 +237,7 @@ The final system prompt is assembled as: `AiSystemPrompt.content` + prompt templ
 
 All routes use the middleware from `code-talker.middleware`.
 
-If `routes/codetalker-chatbots.php` or `routes/codetalker-admin.php` exists in
+If `routes/codetalker-chatbots.php` exists in
 the host app, the package will load those published copies instead of its
 internal defaults.
 
@@ -650,40 +651,78 @@ Memories are stored in `AiFeatureMemory` and scoped per user:
 | `domain_knowledge` | Facts about the user not covered by other data    |
 | `system_tuning`    | What worked well or poorly in this bot's approach |
 
-Memories are ranked by `confidence` and `times_reinforced` and injected into the system prompt under `## Learned Insights`. Memories can be reviewed and edited at `/admin/ai/memories`.
+Memories are ranked by `confidence` and `times_reinforced` and injected into the system prompt under `## Learned Insights`. Memories can be reviewed and edited through `AiMemoryManager` (see **Management Services**).
 
 To rebuild all memories for a feature from historical conversations:
 
 ```bash
-# Via admin UI at /admin/ai/memories — use the "Rebuild" action
-# Or via code:
 app(\Jvjvjv\CodeTalker\Services\AiMemoryService::class)->rebuildMemories('chat-bot:my-bot');
 ```
 
-## Admin Routes
+## Management Services
 
-The admin route group is registered under `/admin/ai/*` and uses the middleware
-defined in `code-talker.admin_middleware`, which defaults to `['web', 'auth', 'can:manage-ai-tools']`.
+The package registers no admin routes and ships no admin UI. Everything an admin
+screen needs is exposed as a service you call from your own controllers, commands,
+or tests, under `Jvjvjv\CodeTalker\Services\Management`.
 
-If your host app does not already provide that gate, wire it yourself or change
-`code-talker.admin_middleware` to the authorization middleware your application
-already uses.
+| Service                 | Responsibilities                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| `AiSystemManager`       | Create/update/delete/duplicate systems, sync feature defaults, list provider models          |
+| `AiSystemPromptManager` | Reusable system prompt CRUD, clearing references on delete                                   |
+| `AiChatBotManager`      | Chat bot CRUD, per-bot usage rollups, available systems, available tools                     |
+| `AiConversationManager` | Filter and search conversations, inspect one, queue usage backfill                           |
+| `AiMemoryManager`       | Memory CRUD, triage-ordered listing, per-feature rebuild                                     |
 
-All admin routes are under `/admin/ai` and require the `can:manage-ai-tools` gate (configurable via `admin_middleware`).
-
-| Prefix                     | Resource                                     |
-| -------------------------- | -------------------------------------------- |
-| `/admin/ai/systems`        | AI Systems CRUD + interaction log viewer     |
-| `/admin/ai/system-prompts` | Reusable system prompt CRUD                  |
-| `/admin/ai/chat-bots`      | Chat bot CRUD                                |
-| `/admin/ai/conversations`  | Conversation viewer + usage backfill trigger |
-| `/admin/ai/memories`       | Feature memory CRUD + per-feature rebuild    |
-
-Define the `manage-ai-tools` gate in your `AppServiceProvider` or `AuthServiceProvider`:
+Each manager validates its own input and throws `ValidationException` on bad data,
+so a controller can let Laravel render the errors as usual:
 
 ```php
-Gate::define('manage-ai-tools', fn ($user) => (bool) $user->is_admin);
+use Jvjvjv\CodeTalker\Services\Management\AiSystemManager;
+
+public function store(Request $request, AiSystemManager $systems)
+{
+    $system = $systems->create($request->all());
+
+    return redirect()->route('your.systems.index');
+}
 ```
+
+If you would rather validate in a form request, take the rules from the manager
+so the domain constraints stay in one place:
+
+```php
+public function rules(): array
+{
+    return AiSystemManager::createRules($this->all());
+}
+```
+
+Operations that have a side effect beyond the record report it, so you can build
+an accurate confirmation message:
+
+```php
+$deactivatedBots = $systems->delete($system);       // bots are deactivated, not deleted
+$orphanedSystems = $prompts->delete($prompt);       // systems have their prompt cleared
+```
+
+### What to be aware of
+
+- **`provider` and `model` are immutable** once a system exists. Changing either
+  would invalidate the stored capability flags with no way to detect it, so
+  `update()` ignores both. Create a new system instead.
+- **A feature has exactly one default system.** Assigning a feature default that
+  another system holds takes it from that system. `claimedFeatures()` tells you
+  which are already spoken for, optionally ignoring the system being edited.
+- **`config`, `credentials`, and `pricing_profile`** may be passed as JSON strings
+  or arrays; the manager decodes strings before persisting.
+- **`custom_system_prompt`** is not a column. Supplying it without a
+  `system_prompt_id` creates an `AiSystemPrompt` and links it.
+
+### Authorization
+
+Authorization is entirely yours — the services do not check it. `admin_middleware`
+remains in the config for host apps that kept a published copy of the old admin
+route file, and defaults to `['web', 'auth', 'can:manage-ai-tools']`.
 
 ## Scheduled Jobs
 
