@@ -18,6 +18,7 @@ It stays a minor bump despite the breakage because the package is not yet 1.0.0-
 - **`TranscriptBuilder` and `ConversationTranscript` are removed**, replaced by `Services/Conversation/CodeTalkerConversationStore`.
 - **A new migration is required.** `2026_08_16_000001_add_message_structure_to_ai_conversation_messages_table` adds `user_id`, `agent`, `attachments`, `tool_calls`, `tool_results`, and `usage`. Re-publish migrations and run them.
 - **The `inertia` config block is removed and `inertiajs/inertia-laravel` is no longer a dependency.** Hosts that render the chat pages keep their own components and install Inertia themselves.
+- **`fetch-web-page` now fetches public hosts only by default.** A URL whose host resolves to a loopback, link-local, or private-network address is refused unless the call declares `request_policy.allow_private_hosts`. A bot that reads pages on an internal network needs that declaration added. The tool also gains a fifth input, `request_policy`, and reports the final destination as `url` when a fetch redirects.
 - Only the Inertia page-prop half of the published TypeScript declarations is gone. The stream contract — `StreamTranslator`, the `ChatStreamEvent` union, and the `code-talker-types` and `code-talker-client` publish tags — is unchanged.
 
 ### New Features
@@ -27,7 +28,9 @@ It stays a minor bump despite the breakage because the package is not yet 1.0.0-
 - Added the `http-request` tool: `GET`/`POST`/`PUT`/`PATCH`/`DELETE` with an optional body, decoding JSON, XML, plain text, and HTML. JSON and XML come back as structures rather than strings; binary content types are refused rather than base64-encoded into the transcript.
 - Added the `get-temporal-information` tool, returning the current date and time in an optional IANA timezone or fixed UTC offset, with the calendar parts pre-computed.
 - Added `code-talker.tools.http_request.credentials`, a host-keyed map of request headers. `http-request` strips model-supplied authentication headers and attaches credentials from this config instead, so a token is never visible to, or inventable by, the model.
-- `fetch-web-page`'s fetching and extraction moved into `Services/Web/WebFetcher`, now shared with `http-request`. `fetch-web-page`'s tool name, inputs, response keys, and error strings are unchanged.
+- `fetch-web-page`'s fetching and extraction moved into `Services/Web/WebFetcher`, now shared with `http-request`. Its tool name, handler signature, response keys, and existing error strings are unchanged.
+- Both web tools accept an optional `request_policy` declaring which hosts a call may reach, enforced by one shared `Services/Web/HostGate`. `http-request` requires it; `fetch-web-page` defaults to public hosts only when it is omitted.
+- Both web tools re-check every redirect destination against the same policy instead of following redirects automatically, and connect to the address that was checked rather than resolving the host a second time.
 - Both new tools are registered on the external MCP server alongside `fetch-web-page`, `search-web`, and `scan-memories`.
 
 ### Bug Fixes
@@ -38,9 +41,6 @@ It stays a minor bump despite the breakage because the package is not yet 1.0.0-
 - Removed an unused `AiMemoryService` parameter, an unused import, and an `_id` key that read a camelCase property off a snake_case column.
 
 ### Known Issues
-- `http-request`'s request policy is declared by the model itself. That makes intent explicit and auditable in the `AiLlmMessage` log and prevents accidental reach into internal services, but it is **not** a defence against a prompt-injected model, which can declare a permissive policy. Keep `http-request` out of `allowed_tools` for any bot that takes untrusted input.
-- `http-request` re-validates every redirect hop against the declared policy, but the check runs against the address resolved at validation time and so does not survive DNS rebinding.
-- `fetch-web-page` performs no private-host checks at all and will fetch loopback and link-local addresses directly. This predates this release and is unchanged by it; treat it the same way as `http-request` when choosing `allowed_tools`.
 - A host that has already registered its own tool named `http-request` through `addToolDirectory()` will shadow the package's, because host directories are discovered after package ones. Check for the collision before upgrading.
 
 ## [0.10.0] — 2026-07-27

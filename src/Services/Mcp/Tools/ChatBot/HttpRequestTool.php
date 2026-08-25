@@ -3,6 +3,8 @@
 namespace Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot;
 
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Jvjvjv\CodeTalker\Services\Web\HostGate;
+use Jvjvjv\CodeTalker\Services\Web\RequestPolicy;
 use Jvjvjv\CodeTalker\Services\Web\WebFetcher;
 use Jvjvjv\CodeTalker\Support\ToolContext;
 use Laravel\Mcp\Request;
@@ -24,8 +26,12 @@ class HttpRequestTool extends Tool
 {
     private const SUPPORTED_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 
+    private const PRIVATE_HOST_MESSAGE = 'This request was not sent. The host "%s" resolves to a private, loopback, '
+        . 'or link-local address, and the request_policy you declared does not set allow_private_hosts. Set it to '
+        . 'true only if reaching an internal service is genuinely what you intend.';
+
     public function __construct(
-        private ToolContext $context,
+        protected ToolContext $context,
     ) {}
 
     /**
@@ -82,30 +88,25 @@ class HttpRequestTool extends Tool
     {
         $url = trim((string) $request->get('url', ''));
         $method = strtoupper(trim((string) $request->get('method', '')));
+        $declared = (array) ($request->get('request_policy') ?? []);
 
-        $policy = (array) ($request->get('request_policy') ?? []);
-
-        if (($refusal = $this->refuseUnsupportedScheme($url)) !== null) {
+        // Fail closed on the declaration itself. This tool's dangerous surface is
+        // methods, and a missing policy means "I don't know what you intend to
+        // do" — which has no safe guess. The host checks that follow are shared
+        // with fetch-web-page and live in HostGate.
+        if (($refusal = $this->refuseUndeclaredPolicy($declared, $method)) !== null) {
             return Response::error($refusal);
         }
 
-        if (($refusal = $this->refuseOutsidePolicy($url, $method, $policy)) !== null) {
-            return Response::error($refusal);
-        }
-
-        $fetched = (new WebFetcher($this->context->botName(), 'http-request'))->request(
+        $fetched = $this->fetcher()->request(
             method: $method,
             url: $url,
+            policy: RequestPolicy::declared($declared),
             body: $this->bodyFrom($request),
             headers: (array) ($request->get('headers') ?? []),
             keepHtml: (bool) $request->get('keep_html', false),
             targetSelector: trim((string) $request->get('target_selector', '')),
             truncate: (bool) $request->get('truncate_content', true),
-            // A redirect is a new request to a new host. Validating only the URL
-            // the model named would let a public host bounce this into a private
-            // network, defeating the gate entirely.
-            validateHop: fn (string $hopUrl, string $hopMethod): ?string
-                => $this->refuseUnsupportedScheme($hopUrl) ?? $this->refuseOutsidePolicy($hopUrl, $hopMethod, $policy),
         );
 
         if ($fetched->failed()) {
@@ -136,49 +137,23 @@ class HttpRequestTool extends Tool
     }
 
     /**
-     * Refuse anything that is not http or https, before the policy gate.
-     *
-     * Returns a message rather than a Response so the same check can be reused
-     * to validate each redirect hop.
-     *
-     * This is a correctness bound rather than a caller preference: no legitimate
-     * declared policy wants `file://`, so no policy can permit it.
+     * Overridable so tests can supply a HostGate that does not touch DNS.
      */
-    private function refuseUnsupportedScheme(string $url): ?string
+    protected function fetcher(): WebFetcher
     {
-        if (trim($url) === '') {
-            return 'A URL is required.';
-        }
-
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-        $host = (string) parse_url($url, PHP_URL_HOST);
-
-        if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
-            return 'The URL must be a valid http or https address.';
-        }
-
-        return null;
+        return new WebFetcher(new HostGate(self::PRIVATE_HOST_MESSAGE), $this->context->botName(), 'http-request');
     }
 
     /**
-     * The declared-policy gate. Runs before any socket is opened.
+     * Refuse a request whose policy was never declared, before anything else.
      *
-     * Note what this is and is not. It makes the model's intent explicit and
-     * auditable in the AiLlmMessage log, and it stops a request from reaching
-     * internal services by accident. It is not a defence against a model acting
-     * against the host's interest — such a model simply declares a permissive
-     * policy. Keep this tool out of allowed_tools for bots taking untrusted input.
-     *
-     * @param array<string, mixed> $policy
+     * @param array<string, mixed> $declared
      */
-    private function refuseOutsidePolicy(string $url, string $method, array $policy): ?string
+    private function refuseUndeclaredPolicy(array $declared, string $method): ?string
     {
-        $allowedMethods = array_values(array_filter(array_map(
-            static fn ($value): string => strtoupper(trim((string) $value)),
-            (array) ($policy['allowed_methods'] ?? []),
-        )));
+        $policy = RequestPolicy::declared($declared);
 
-        if ($allowedMethods === []) {
+        if (!$policy->restrictsMethods()) {
             return 'This request was not sent. You must declare request_policy.allowed_methods — a non-empty list of the '
                 . 'HTTP methods you intend to use, for example {"allowed_methods": ["GET"]}. Add it and call this tool again.';
         }
@@ -191,105 +166,7 @@ class HttpRequestTool extends Tool
             );
         }
 
-        if (!in_array($method, $allowedMethods, true)) {
-            return sprintf(
-                'This request was not sent. You asked for %s, but the request_policy you declared allows only: %s. '
-                . 'Either use an allowed method, or declare %s in request_policy.allowed_methods.',
-                $method,
-                implode(', ', $allowedMethods),
-                $method,
-            );
-        }
-
-        $host = strtolower((string) parse_url($url, PHP_URL_HOST));
-
-        $allowedHosts = array_values(array_filter(array_map(
-            static fn ($value): string => strtolower(trim((string) $value)),
-            (array) ($policy['allowed_hosts'] ?? []),
-        )));
-
-        if ($allowedHosts !== [] && !in_array($host, $allowedHosts, true)) {
-            return sprintf(
-                'This request was not sent. The host "%s" is not in the allowed_hosts you declared: %s.',
-                $host,
-                implode(', ', $allowedHosts),
-            );
-        }
-
-        if (!$this->isPrivateHost($host) || ($policy['allow_private_hosts'] ?? false) === true) {
-            return null;
-        }
-
-        return sprintf(
-            'This request was not sent. The host "%s" resolves to a private, loopback, or link-local address, and the '
-            . 'request_policy you declared does not set allow_private_hosts. Set it to true only if reaching an '
-            . 'internal service is genuinely what you intend.',
-            $host,
-        );
-    }
-
-    /**
-     * Whether a host is, or resolves to, an address on a non-public network.
-     *
-     * The check runs against the address resolved here, not the address the
-     * connection ultimately uses, so it does not survive DNS rebinding. That is
-     * a known limitation recorded in the change's design notes.
-     */
-    protected function isPrivateHost(string $host): bool
-    {
-        if ($host === '') {
-            return true;
-        }
-
-        foreach ($this->addressesFor($host) as $address) {
-            if (filter_var($address, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) === false) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * The IP addresses a host maps to — the literal itself, or its DNS records.
-     *
-     * A name that does not resolve is reported as private so an unresolvable
-     * host fails the gate rather than slipping past it.
-     *
-     * Protected because it is the seam that keeps tests off the network: a test
-     * subclass overrides it with a fixed host-to-address map.
-     *
-     * @return array<int, string>
-     */
-    protected function addressesFor(string $host): array
-    {
-        $unbracketed = trim($host, '[]');
-
-        if (filter_var($unbracketed, FILTER_VALIDATE_IP) !== false) {
-            return [$unbracketed];
-        }
-
-        if (strtolower($host) === 'localhost') {
-            return ['127.0.0.1'];
-        }
-
-        $records = @dns_get_record($host, DNS_A | DNS_AAAA);
-
-        if ($records === false || $records === []) {
-            return ['127.0.0.1'];
-        }
-
-        $addresses = [];
-
-        foreach ($records as $record) {
-            $address = $record['ip'] ?? $record['ipv6'] ?? null;
-
-            if (is_string($address) && $address !== '') {
-                $addresses[] = $address;
-            }
-        }
-
-        return $addresses === [] ? ['127.0.0.1'] : $addresses;
+        return null;
     }
 
     private function bodyFrom(Request $request): ?string

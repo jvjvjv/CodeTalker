@@ -9,6 +9,8 @@ use Jvjvjv\CodeTalker\Models\AiChatBot;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Services\Mcp\ToolResultConverter;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\HttpRequestTool;
+use Jvjvjv\CodeTalker\Services\Web\HostGate;
+use Jvjvjv\CodeTalker\Services\Web\WebFetcher;
 use Jvjvjv\CodeTalker\Support\ToolContext;
 use Jvjvjv\CodeTalker\Support\WebScraperUserAgent;
 use Jvjvjv\CodeTalker\Tests\TestCase;
@@ -33,15 +35,24 @@ class HttpRequestToolTest extends TestCase
         }
 
         return new class($context) extends HttpRequestTool {
-            /** @return array<int, string> */
-            protected function addressesFor(string $host): array
+            protected function fetcher(): WebFetcher
             {
-                return match ($host) {
-                    'localhost', '127.0.0.1' => ['127.0.0.1'],
-                    'internal.test' => ['10.0.0.5'],
-                    'metadata.test' => ['169.254.169.254'],
-                    default => ['93.184.216.34'],
+                $gate = new class('This request was not sent. The host "%s" resolves to a private, loopback, '
+                    . 'or link-local address, and the request_policy you declared does not set allow_private_hosts. '
+                    . 'Set it to true only if reaching an internal service is genuinely what you intend.') extends HostGate {
+                    /** @return array<int, string> */
+                    protected function addressesFor(string $host): array
+                    {
+                        return match ($host) {
+                            'localhost', '127.0.0.1' => ['127.0.0.1'],
+                            'internal.test' => ['10.0.0.5'],
+                            'metadata.test' => ['169.254.169.254'],
+                            default => ['93.184.216.34'],
+                        };
+                    }
                 };
+
+                return new WebFetcher($gate, $this->context->botName(), 'http-request');
             }
         };
     }

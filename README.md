@@ -450,7 +450,7 @@ tool name.
 
 The package includes built-in tools under `src/Services/Mcp/Tools/ChatBot`.
 
-- `fetch-web-page`: Fetches readable text from a URL. `GET` only, HTML and plain text only.
+- `fetch-web-page`: Fetches readable text from a URL. `GET` only, HTML and plain text only. Public hosts only unless told otherwise.
 - `http-request`: Issues a `GET`/`POST`/`PUT`/`PATCH`/`DELETE` request and returns the decoded response — JSON, XML, plain text, or HTML. See below.
 - `get-temporal-information`: Returns the current date and time, optionally in a given IANA timezone or UTC offset.
 - `scan-memories`: Searches stored user memories for relevant context.
@@ -487,6 +487,34 @@ Input:
 The response carries `iso8601`, `utc_iso8601`, `timezone`, `utc_offset`,
 `unix_timestamp`, `date`, `time`, `day_of_week`, and `human`, so the model does no
 calendar arithmetic on a string.
+
+#### `fetch-web-page`
+
+Inputs: `url` (required), plus optional `keep_html`, `target_selector`,
+`truncate_content`, and `request_policy`.
+
+`request_policy` is the same idiom `http-request` uses, minus `allowed_methods` —
+this tool is GET-only:
+
+```jsonc
+"request_policy": {
+  "allow_private_hosts": false,          // default
+  "allowed_hosts": ["wiki.internal"]     // optional
+}
+```
+
+**Omitting it fetches public hosts only.** Reaching a loopback, link-local, or
+private-network address requires declaring `allow_private_hosts`. The declaration is
+optional; the permission is not.
+
+Redirects are re-validated hop by hop against the same policy, capped at five, and the
+response `url` reports the final destination.
+
+Note the difference from `http-request`, which *requires* its policy and refuses
+without one. The tools have different surfaces: `http-request` can change server state,
+so a missing policy there has no safe interpretation. `fetch-web-page` only reads, and
+"public hosts only" is an unambiguous safe default — so it applies that default rather
+than spending a round trip asking for a field whose value the caller already wanted.
 
 #### `http-request`
 
@@ -525,19 +553,16 @@ model what to declare. A request outside the declared policy is refused against 
 policy it declared. Non-`http(s)` schemes are refused unconditionally — no policy can
 permit `file://`.
 
-**Redirects are not followed blindly.** Guzzle follows up to five redirects by
-default, which would let a permitted public URL bounce the request onto an internal
-address the gate never saw. `http-request` disables automatic redirects and re-runs
-the full gate against every hop, capped at five, re-deriving credentials from each
-hop's own host. `fetch-web-page` is unaffected and still follows redirects normally.
+**Redirects are not followed blindly.** Both tools disable automatic redirects and
+re-run the full policy check against every hop, capped at five, re-deriving credentials
+from each hop's own host. Each request also connects to the address that was checked,
+rather than resolving the host a second time.
 
-> **Security: a self-declared policy is not a security boundary.** Requiring the model
-> to declare its intent stops *accidental* reach into your internal services and writes
-> that intent into the `AiLlmMessage` log, where it is auditable. It does not stop a
-> prompt-injected or adversarial model, which simply declares
-> `"allow_private_hosts": true`. **Keep `http-request` out of `allowed_tools` for any
-> bot that takes untrusted input**, and prefer running the app where internal services
-> are not reachable from the PHP process.
+> **A declared policy is a guardrail, not a boundary.** It records intent in the
+> `AiLlmMessage` log and keeps requests from reaching internal services by accident, but
+> the caller declaring it is the model itself. **Keep these tools out of `allowed_tools`
+> for any bot that takes untrusted input**, and restrict outbound network access from
+> the PHP process rather than relying on the tool to police itself.
 
 **The model never supplies credentials.** `Authorization`, `Proxy-Authorization`,
 `Cookie`, `Host`, and the hop-by-hop headers are stripped from model-supplied headers

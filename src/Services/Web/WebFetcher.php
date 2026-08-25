@@ -66,6 +66,7 @@ class WebFetcher
     ];
 
     public function __construct(
+        private readonly HostGate $gate,
         private readonly ?string $botName = null,
         private readonly string $logLabel = 'fetch-web-page',
     ) {}
@@ -78,35 +79,32 @@ class WebFetcher
      */
     public function fetchPage(
         string $url,
+        RequestPolicy $policy,
         bool $keepHtml = false,
         string $targetSelector = '',
         bool $truncate = true,
     ): FetchedResponse {
-        if (($invalid = $this->validateUrl($url)) !== null) {
-            return $invalid;
-        }
-
-        $sent = $this->send('GET', $url, null, []);
+        $sent = $this->sendFollowingRedirects('GET', $url, null, [], $policy);
 
         if ($sent instanceof FetchedResponse) {
             return $sent;
         }
 
-        [$status, $contentType, $body] = $sent;
+        [$status, $contentType, $body, , $finalUrl] = $sent;
 
         if ($body === '') {
-            return FetchedResponse::failure($url, 'The page returned an empty response body.');
+            return FetchedResponse::failure($finalUrl, 'The page returned an empty response body.');
         }
 
         if (str_contains($contentType, 'text/plain')) {
-            return $this->textResponse($url, $status, $contentType, $body, $truncate);
+            return $this->textResponse($finalUrl, $status, $contentType, $body, $truncate);
         }
 
         if (!$this->isHtml($contentType)) {
-            return FetchedResponse::failure($url, 'The URL did not return an HTML or plain text page.');
+            return FetchedResponse::failure($finalUrl, 'The URL did not return an HTML or plain text page.');
         }
 
-        return $this->htmlResponse($url, $status, $contentType, $body, $keepHtml, $targetSelector, $truncate);
+        return $this->htmlResponse($finalUrl, $status, $contentType, $body, $keepHtml, $targetSelector, $truncate);
     }
 
     /**
@@ -129,20 +127,16 @@ class WebFetcher
     public function request(
         string $method,
         string $url,
+        RequestPolicy $policy,
         ?string $body = null,
         array $headers = [],
         bool $keepHtml = false,
         string $targetSelector = '',
         bool $truncate = true,
-        ?callable $validateHop = null,
     ): FetchedResponse {
-        if (($invalid = $this->validateUrl($url)) !== null) {
-            return $invalid;
-        }
-
         [$safeHeaders, $strippedHeaders] = $this->filterRequestHeaders($headers);
 
-        $sent = $this->sendFollowingRedirects(strtoupper($method), $url, $body, $safeHeaders, $validateHop);
+        $sent = $this->sendFollowingRedirects(strtoupper($method), $url, $body, $safeHeaders, $policy);
 
         if ($sent instanceof FetchedResponse) {
             return $sent->withStrippedHeaders($strippedHeaders);
@@ -170,23 +164,24 @@ class WebFetcher
         string $url,
         ?string $body,
         array $safeHeaders,
-        ?callable $validateHop,
+        RequestPolicy $policy,
     ): array|FetchedResponse {
         $currentUrl = $url;
         $currentMethod = $method;
         $currentBody = $body;
 
         for ($hop = 0; $hop <= self::MAX_REDIRECTS; $hop++) {
-            if ($hop > 0 && $validateHop !== null) {
-                $refusal = $validateHop($currentUrl, $currentMethod);
+            $refusal = $this->gate->refuse($currentUrl, $currentMethod, $policy);
 
-                if ($refusal !== null) {
-                    return FetchedResponse::failure($currentUrl, sprintf(
+            if ($refusal !== null) {
+                return FetchedResponse::failure(
+                    $currentUrl,
+                    $hop === 0 ? $refusal : sprintf(
                         'The request was redirected to %s, and that destination was refused. %s',
                         $currentUrl,
                         $refusal,
-                    ));
-                }
+                    ),
+                );
             }
 
             $sent = $this->send(
@@ -194,7 +189,6 @@ class WebFetcher
                 $currentUrl,
                 $currentBody,
                 array_merge($safeHeaders, $this->credentialsFor($currentUrl)),
-                followRedirects: false,
             );
 
             if ($sent instanceof FetchedResponse) {
@@ -253,33 +247,13 @@ class WebFetcher
     }
 
     /**
-     * Refuse anything that is not an absolute http or https URL.
-     *
-     * This is not negotiable by a caller-supplied policy: no legitimate request
-     * policy wants `file://`.
-     */
-    private function validateUrl(string $url): ?FetchedResponse
-    {
-        if (trim($url) === '') {
-            return FetchedResponse::failure($url, 'A URL is required.');
-        }
-
-        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-        $host = (string) parse_url($url, PHP_URL_HOST);
-
-        if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
-            return FetchedResponse::failure($url, 'The URL must be a valid http or https address.');
-        }
-
-        return null;
-    }
-
-    /**
      * Perform one request.
      *
-     * $followRedirects is left on for `fetch-web-page`, whose behavior is
-     * unchanged by contract, and turned off for `http-request`, where each hop
-     * is validated by {@see sendFollowingRedirects()} before it is issued.
+     * Redirects are never followed here. {@see sendFollowingRedirects()} owns
+     * the hop loop so every destination passes the gate before it is requested.
+     *
+     * The address the gate validated is pinned into the connection, so the host
+     * cannot resolve to somewhere else between the check and the socket.
      *
      * @param array<string, mixed> $headers
      * @return array{0: int, 1: string, 2: string, 3: ?string}|FetchedResponse Tuple on success, failure otherwise
@@ -289,15 +263,14 @@ class WebFetcher
         string $url,
         ?string $body,
         array $headers,
-        bool $followRedirects = true,
     ): array|FetchedResponse {
         $request = Http::connectTimeout(self::CONNECT_TIMEOUT)
             ->timeout(self::TIMEOUT)
-            ->withHeaders($this->mergeHeaders($this->defaultHeaders(), $headers));
-
-        if (!$followRedirects) {
-            $request = $request->withOptions(['allow_redirects' => false]);
-        }
+            ->withHeaders($this->mergeHeaders($this->defaultHeaders(), $headers))
+            ->withOptions(array_merge(
+                ['allow_redirects' => false],
+                $this->addressPinFor($url),
+            ));
 
         if ($body !== null && $body !== '') {
             $request = $request->withBody($body, $this->requestContentType($headers));
@@ -343,6 +316,50 @@ class WebFetcher
             mb_substr($response->body(), 0, self::MAX_BODY_LENGTH),
             ($location === null || $location === '') ? null : $location,
         ];
+    }
+
+    /**
+     * cURL options pinning this URL's host to the address the gate validated.
+     *
+     * CURLOPT_RESOLVE pre-seeds cURL's DNS cache, so no second lookup happens
+     * at connect time. Without this the gate and the socket resolve
+     * independently, and a host that answers differently between the two walks
+     * straight through the check.
+     *
+     * Guzzle's CurlFactory passes $options['curl'] through as raw cURL options
+     * and Laravel's withOptions() forwards them, so this needs no new
+     * dependency. Under a non-cURL handler the option is ignored and behavior
+     * falls back to resolving at connect — the gate still runs.
+     *
+     * @return array<string, mixed>
+     */
+    private function addressPinFor(string $url): array
+    {
+        $host = (string) parse_url($url, PHP_URL_HOST);
+        $address = $this->gate->validatedAddressFor($url);
+
+        if ($host === '' || $address === null) {
+            return [];
+        }
+
+        // A literal host needs no pinning, and pinning an IPv6 literal to itself
+        // confuses curl's cache key.
+        if (filter_var(trim($host, '[]'), FILTER_VALIDATE_IP) !== false) {
+            return [];
+        }
+
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        $port = parse_url($url, PHP_URL_PORT) ?? ($scheme === 'https' ? 443 : 80);
+
+        // CURLOPT_RESOLVE wants host:port:address, with IPv6 bracketed.
+        $entry = sprintf(
+            '%s:%d:%s',
+            trim($host, '[]'),
+            $port,
+            str_contains($address, ':') ? '[' . trim($address, '[]') . ']' : $address,
+        );
+
+        return ['curl' => [CURLOPT_RESOLVE => [$entry]]];
     }
 
     /**
