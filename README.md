@@ -1,6 +1,6 @@
 # code-talker
 
-Multi-provider AI communications package for Laravel — chatbots, streaming, tool-use, memory, and admin management.
+Multi-provider AI communications package for Laravel — conversation storage, streaming turns, tool-use, memory, and management services. No routes, no UI.
 
 ## Requirements
 
@@ -19,22 +19,12 @@ uses laravel/ai on its own.)
 composer require jvjvjv/code-talker
 ```
 
-The package installs the Laravel Inertia adapter as a runtime dependency because
-its public and admin controllers render Inertia responses.
-
 Publish the config and migrations, then run them:
 
 ```bash
 php artisan vendor:publish --tag=code-talker-config
 php artisan vendor:publish --tag=code-talker-migrations
 php artisan migrate
-```
-
-If you want to customize the package route files directly in the host app,
-publish them too:
-
-```bash
-php artisan vendor:publish --tag=code-talker-routes
 ```
 
 ## Upgrading
@@ -64,17 +54,14 @@ and copy over only the new keys.
 | Key                                  | Default                                  | Description                                                      |
 | ------------------------------------ | ---------------------------------------- | ---------------------------------------------------------------- |
 | `user_model`                         | `App\Models\User::class`                 | Eloquent model used for authenticated users                      |
-| `middleware`                         | `['web']`                                | Middleware applied to public chat routes                         |
-| `admin_middleware`                   | `['web', 'auth', 'can:manage-ai-tools']` | Middleware applied to admin routes                               |
 | `reserved_slugs`                     | `[]`                                     | Additional slugs that cannot be used for root-path chatbots      |
+| `feature_keys`                       | `[]`                                     | Valid feature keys for system defaults; empty accepts any string |
 | `schedule`                           | `true`                                   | Set to `false` to disable the package's automatic scheduled jobs |
 | `conversations.idle_timeout_minutes` | `30`                                     | Inactivity before a conversation is marked `Completed`           |
-| `inertia.components.chat_bot`        | `ai/ChatBot`                             | Inertia component rendered for the chat page                     |
-| `inertia.components.chat_bots_index` | `ai/ChatBotsIndex`                       | Inertia component rendered for the bot list                      |
 
 ### Suggested host-app packages
 
-- `bspdx/keystone` is suggested if you want a ready-made host-app authorization layer for the package's admin AI routes.
+- `bspdx/keystone` is suggested if you want a ready-made host-app authorization layer around your own admin screens.
 
 ### Provider environment variables
 
@@ -146,7 +133,7 @@ by the model-status / readiness check (and cloud-provider chat also 404s) for
 
 ## AI Systems
 
-An `AiSystem` record represents a fully configured provider endpoint. Create one through the admin UI at `/admin/ai/systems` or via a seeder. Key fields:
+An `AiSystem` record represents a fully configured provider endpoint. Create one with `AiSystemManager` (see **Management Services**) or via a seeder. Key fields:
 
 | Field              | Description                                                                       |
 | ------------------ | --------------------------------------------------------------------------------- |
@@ -196,11 +183,49 @@ tool use, structured output — applies. Prior versions returned an
 
 ### Feature defaults
 
-Map a feature key to a default `AiSystem` via the `ai_system_feature_defaults` table (managed through `/admin/ai/systems`). This decouples application code from specific system IDs.
+Map a feature key to a default `AiSystem` via the `ai_system_feature_defaults` table (managed through `AiSystemManager`). This decouples application code from specific system IDs.
+
+## Conversation History
+
+The package implements `Laravel\Ai\Contracts\ConversationStore` over its own
+tables and binds it over the framework default, so an agent resumed onto a
+conversation replays Code Talker's history — including tool calls, tool results,
+and attachments, none of which a transcript rebuilt from message text can carry.
+
+```php
+$agent = $factory->forSystem($system)->continue((string) $conversation->id, $user);
+```
+
+Conversations must already exist. `storeConversation()` throws, because a Code
+Talker conversation requires an `AiSystem` that the contract gives no way to
+supply — open one with `AiChatBotConversationService::startConversation()` first.
+
+### Two writers
+
+`continue()` attaches a conversation participant, which arms laravel/ai's
+remembering middleware. That middleware persists both messages of a turn. If you
+*also* drive `AiChatBotConversationService`, every turn is written twice.
+
+The package's own chat flow avoids this by resuming without a participant:
+
+```php
+$agent->withStoredConversation((string) $conversation->id);
+```
+
+That replays history but leaves the middleware disarmed, so `TurnRecorder`
+remains the only writer. This is deliberate rather than incidental: the
+middleware persists from a callback that fires only once the stream is fully
+consumed, and a turn cut short by a client disconnect or the duration guard never
+gets there — so the middleware would silently discard partial output that
+`TurnRecorder` keeps.
+
+If you use `continue()` directly, also set `ai.conversations.generate_title` to
+`false` unless you want a second provider call per new conversation for a title
+the package already derives locally.
 
 ## Chat Bots
 
-An `AiChatBot` defines a user-facing persona. Create one at `/admin/ai/chat-bots`. Key fields:
+An `AiChatBot` defines a user-facing persona. Create one with `AiChatBotManager`. Key fields:
 
 | Field                      | Description                                          |
 | -------------------------- | ---------------------------------------------------- |
@@ -232,53 +257,107 @@ These tokens are replaced when a conversation starts:
 
 The final system prompt is assembled as: `AiSystemPrompt.content` + prompt template + `## Learned Insights` (injected memories).
 
-### Auto-registered routes
+### Driving a turn
 
-All routes use the middleware from `code-talker.middleware`.
+The package registers no routes and renders no pages. You write the endpoint;
+the package supplies the turn.
 
-If `routes/codetalker-chatbots.php` or `routes/codetalker-admin.php` exists in
-the host app, the package will load those published copies instead of its
-internal defaults.
+```php
+use Jvjvjv\CodeTalker\Services\AiChatBotConversationService;
+use Jvjvjv\CodeTalker\Services\ChatBot\SseFrameEncoder;
 
-The package does not treat any bot as inherently public or private. If some
-chatbot routes should require authentication or further authorization, enforce
-that entirely in the consuming application by changing `code-talker.middleware`
-or wrapping the package routes in your own authorization layer.
+public function message(Request $request, AiChatBot $bot,
+    AiChatBotConversationService $chat, SseFrameEncoder $encoder)
+{
+    $validated = $request->validate(['message' => ['required', 'string']]);
 
-| Route                        | Description                                          |
-| ---------------------------- | ---------------------------------------------------- |
-| `GET /chats`                 | List of available bots (Inertia: `ai/ChatBotsIndex`) |
-| `GET /chats/statuses`        | JSON model-readiness status for all bots             |
-| `GET /chat/{slug}`           | Chat UI for a bot (Inertia: `ai/ChatBot`)            |
-| `GET /chat/{slug}/new`       | Start a new conversation                             |
-| `GET /chat/{slug}/status`    | JSON readiness status for one bot                    |
-| `POST /chat/{slug}/warmup`   | Warm up the model                                    |
-| `POST /chat/{slug}/messages` | Send a message (SSE stream)                          |
-| `POST /chat/{slug}/reset`    | Clear current conversation                           |
-| `POST /chat/{slug}/switch`   | Switch to a different conversation from history      |
-| `GET /chat/{slug}/{hash}`    | Load a conversation by its shareable hash            |
+    $conversation = $this->resolveConversation($request, $bot)
+        ?? $chat->startConversation($bot, $request->user());
 
-Root-access-path bots duplicate the above at `/{slug}` instead of `/chat/{slug}`.
+    return response()->stream(function () use ($chat, $conversation, $validated, $encoder) {
+        // PHP only reports a dead connection once output has been flushed to
+        // it, so keep the script alive past an abort and flush every frame.
+        ignore_user_abort(true);
 
-### Conversation state
+        foreach ($encoder->encode($chat->continueConversation($conversation, $validated['message'])) as $frame) {
+            echo $frame;
+            ob_get_level() > 0 && ob_flush();
+            flush();
+        }
+    }, headers: [
+        'Content-Type' => 'text/event-stream',
+        'Cache-Control' => 'no-cache',
+        'X-Accel-Buffering' => 'no',
+        'X-Chat-Hash' => $conversation->chat_hash,
+    ]);
+}
+```
 
-Per-bot conversation state — the current conversation and the switcher history — lives in the server-side session. Only the current conversation's id is mirrored into a single 180-day `ai_chat_bot_current` cookie, so the request header stays small no matter how many bots a visitor has used. History is capped at 25 entries and is never written to a cookie. Legacy per-bot `ai_chat_bot_conversations_{id}` cookies from before 0.7.1 are forgotten on sight. Conversations are also shareable via `/chat/{slug}/{hash}`.
+`continueConversation()` yields **structured events**, not wire-encoded strings.
+`SseFrameEncoder` turns them into the documented server-sent-event framing; skip
+it and deliver them over a websocket, a broadcast channel, or anything else.
 
-## Frontend Integration
+### Turn events
 
-This package ships the chat **backend** — routes, streaming, persistence — and no UI
-components. You build the chat interface in your own framework and design system.
-What follows is the complete contract between the two, so you never need to read
-package source to do it.
+Every event carries a `type`. These are typed in the published declarations.
 
-> **These contracts are public API.** The Inertia props and the SSE event shapes
-> below follow this package's semantic version: renaming a prop, changing an event
-> payload, or removing an event is a breaking change and is released as one.
+| Type                    | Payload                                                     |
+| ----------------------- | ----------------------------------------------------------- |
+| `status`                | `phase` (`model_loading`), `message`                        |
+| `message_start`         | —                                                            |
+| `content_block_delta`   | `delta.text`                                                 |
+| `reasoning_block_delta` | `delta.reasoning`                                            |
+| `message_delta`         | `delta.stop_reason`, `usage`                                 |
+| `message_stop`          | —                                                            |
+| `error`                 | `message`, `reason` (`max_stream_duration`/`provider_error`) |
+
+Encoded, each becomes `data: <json>\n\n`, and a turn that **finished** ends with
+`data: [DONE]\n\n`. An `error` event is terminal on its own and is *not*
+followed by the sentinel — that asymmetry is how a consumer tells a failed turn
+from a completed one.
+
+### Cancellation
+
+The turn stops early when its cancellation check fires, and whatever it produced
+is still persisted. The default suits a web request:
+
+```php
+// Default: stops when the browser hangs up.
+$chat->continueConversation($conversation, $message);
+```
+
+Outside a request that default is useless — `connection_aborted()` reports 0 in
+CLI and queue contexts, so the guard silently never fires. Supply your own:
+
+```php
+$chat->usingCancellationCheck(fn (): bool => $job->isReleased())
+     ->continueConversation($conversation, $message);
+```
+
+### Resolving conversations across requests
+
+The package used to keep this in the session and a cookie. It no longer does —
+your endpoint decides. `AiConversation::findByChatHashOrUuid()` is the lookup,
+and `$conversation->chat_hash` is a stable shareable handle that
+`continueConversation()` keeps current.
+
+### Presentation queries
+
+`ChatBotPresenter` keeps the queries a chat UI needs:
+
+```php
+$presenter->transcript($conversation);            // visible messages, system prompt excluded
+$presenter->totalCostUsd($bot);                   // lifetime cost for a bot
+$presenter->conversationsFor($user, $bots);       // an authenticated user's conversations
+```
+
+Readiness and warm-up are unchanged and were always transport-free:
+`AiModelReadinessService` and `ChatBotStatusResolver`.
 
 ### Publishing types and a stream client
 
 ```bash
-# TypeScript declarations for the props and stream events.
+# TypeScript declarations for the turn events and transcript shape.
 # Safe to re-publish on upgrade — these track the package.
 php artisan vendor:publish --tag=code-talker-types
 
@@ -287,167 +366,10 @@ php artisan vendor:publish --tag=code-talker-types
 php artisan vendor:publish --tag=code-talker-client
 ```
 
-Both are optional. The client is a starting point, not a dependency — it imports
-nothing but standard browser APIs and works with React, Vue, Svelte, or none.
+The client POSTs a message and parses the encoded stream into typed callbacks
+(`onText`, `onReasoning`, `onDone`, `onError`, …) with an abort handle. It works
+against any endpoint that emits the framing above.
 
-### Inertia component names
-
-The two pages render `ai/ChatBot` and `ai/ChatBotsIndex` by default. Point them at
-your own component paths in `config/code-talker.php`:
-
-```php
-'inertia' => [
-    'components' => [
-        'chat_bot' => 'ai/ChatBot',
-        'chat_bots_index' => 'ai/ChatBotsIndex',
-    ],
-],
-```
-
-### Props: the chat page
-
-Rendered by `GET /chat/{slug}` and `GET /chat/{slug}/{hash}`.
-
-| Prop | Type | Notes |
-| --- | --- | --- |
-| `bot.name` | `string` | |
-| `bot.description` | `string \| null` | |
-| `bot.require_visitor_identity` | `boolean` | Whether the bot asks anonymous visitors for a name and email |
-| `bot.total_cost_usd` | `number` | Lifetime spend across every conversation with this bot |
-| `messages` | `ChatMessage[]` | The visible transcript; the system prompt is never included |
-| `messages[].role` | `'user' \| 'assistant'` | |
-| `messages[].content` | `string` | |
-| `messages[].reasoning_content` | `string \| null` | Populated for reasoning models |
-| `messages[].blocks` | `MessageBlock[] \| null` | Ordered `{type: 'text' \| 'reasoning', content}` runs; `null` on older records |
-| `history` | `ChatHistoryEntry[]` | The conversation switcher |
-| `history[].handle` | `string` | Opaque id to POST to `switchUrl` |
-| `history[].label` | `string` | Conversation title, or `'New chat'` |
-| `history[].is_current` | `boolean` | |
-| `history[].is_stale` | `boolean` | No activity for 7 days |
-| `history[].updated_at` | `string` | Human-readable, e.g. `'3 hours ago'` |
-| `history[].cost_usd` | `number \| null` | |
-| `messageUrl` | `string` | POST here to send a message (SSE response) |
-| `resetUrl` | `string` | POST to start a new conversation |
-| `switchUrl` | `string` | POST a `conversation` handle to switch |
-| `statusUrl` | `string` | GET model readiness |
-| `warmupUrl` | `string` | POST to warm the model |
-| `chatUrl` | `string \| null` | Shareable link, `null` until the conversation has a hash |
-| `chatUrlBase` | `string` | e.g. `/chat/my-bot/`, for building links client-side |
-| `showIdentityForm` | `boolean` | Whether to collect a visitor name and email before the first message |
-| `chatHash` | `string \| null` | **Only present on `/chat/{slug}/{hash}`.** Absent from `/chat/{slug}` |
-
-`showIdentityForm` is derived differently on each route, deliberately. On
-`/chat/{slug}` it is true when there is no stored conversation at all; on
-`/chat/{slug}/{hash}` the conversation exists by definition, so it is true when
-that conversation has no non-system messages yet.
-
-### Props: the index page
-
-Rendered by `GET /chats`.
-
-| Prop | Type | Notes |
-| --- | --- | --- |
-| `bots[].slug` | `string` | |
-| `bots[].name` | `string` | |
-| `bots[].description` | `string \| null` | |
-| `bots[].new_chat_url` | `string` | |
-| `bots[].status_url` | `string` | |
-| `bots[].conversations` | `array` | **Empty for guests** — only populated for an authenticated user |
-| `bots[].conversations[].title` | `string` | |
-| `bots[].conversations[].updated_at` | `string \| null` | ISO 8601 |
-| `bots[].conversations[].updated_at_human` | `string` | e.g. `'3 hours ago'` |
-| `bots[].conversations[].is_stale` | `boolean` | |
-
-### The message stream
-
-`POST {messageUrl}` responds with `text/event-stream`. Every frame is
-`data: <json>\n\n`. The response also carries an **`X-Chat-Hash`** header with the
-conversation's shareable hash — read it from the response headers to update the
-URL after the first message.
-
-| Event | Payload | Meaning |
-| --- | --- | --- |
-| `status` | `{phase, message}` | Progress before tokens arrive. `phase` is `request_received` then `model_loading` |
-| `message_start` | `{message: {usage: {input_tokens: null}}}` | The turn has begun. Sent exactly once |
-| `content_block_delta` | `{delta: {text}}` | Append `text` to the answer |
-| `reasoning_block_delta` | `{delta: {reasoning}}` | Append `reasoning` to the thinking trace |
-| `message_delta` | `{delta: {stop_reason}, usage: {input_tokens, output_tokens}}` | Terminal summary. `stop_reason` is `end_turn`, `max_tokens`, or `tool_use` |
-| `message_stop` | `{}` | The turn's content is complete |
-| `error` | `{message, reason?}` | The turn failed. See below |
-
-A turn that finishes normally ends with the literal sentinel:
-
-```
-data: [DONE]
-
-```
-
-**An error frame is terminal on its own — `[DONE]` does not follow it.** Treat any
-`error` as the end of the turn rather than waiting for a sentinel that never
-arrives. `reason` is `max_stream_duration` when the wall-clock guard cut the turn
-off, `provider_error` for a provider failure, and absent for a recoverable
-in-stream error or a transport-level failure. Content already delivered via
-`content_block_delta` before the error is still valid and is persisted server-side
-— do not discard it.
-
-Tool calls are never forwarded to the browser. A turn that uses tools looks
-exactly like one that does not, apart from taking longer.
-
-> **Known wart:** the `status` frames predate `message_start` and overlap with it.
-> Both are emitted today and both are part of the current contract. A future major
-> version may drop `status` in favour of `message_start` alone.
-
-### The other endpoints
-
-`GET {statusUrl}` and `POST {warmupUrl}` return JSON for model readiness — poll
-the first to disable the composer while a local model loads, and call the second
-to trigger a load:
-
-```json
-{
-  "status": {
-    "state": "loaded",
-    "provider": "lm-studio",
-    "model": "qwen3-8b",
-    "message": "Model is loaded and ready.",
-    "checked_at": "2026-07-27T10:15:00+00:00"
-  }
-}
-```
-
-`state` is `loaded`, `not_loaded`, or `unavailable`. The warmup response adds a
-`warmup_attempted` boolean. `GET /chats/statuses` returns the same status object
-for every bot at once, keyed by slug, as `{"statuses": {"my-bot": {…}}}`.
-
-`POST {resetUrl}` and `POST {switchUrl}` **redirect** rather than returning JSON —
-they are ordinary Inertia visits, not fetch calls. `switchUrl` expects a
-`conversation` field holding a `history[].handle`.
-
-### Consuming the stream
-
-The published client wraps all of the above:
-
-```ts
-import { streamChatTurn } from './code-talker-stream';
-
-const turn = streamChatTurn(props.messageUrl, { message: 'Hello' }, {
-    onChatHash: (hash) => history.replaceState(null, '', props.chatUrlBase + hash),
-    onStatus: (phase) => setPhase(phase),
-    onText: (delta) => setAnswer((prev) => prev + delta),
-    onReasoning: (delta) => setThinking((prev) => prev + delta),
-    onDone: ({ stopReason, usage }) => setDone(stopReason, usage),
-    onError: ({ message, reason }) => setError(message, reason),
-});
-
-// Cancel mid-turn. The server still persists whatever was generated.
-turn.abort();
-
-await turn.done;
-```
-
-If the bot has `require_visitor_identity` and the visitor is not authenticated,
-send `name` and `email` alongside `message` on the first request of a
-conversation.
 
 ## Tool Registration
 
@@ -528,7 +450,9 @@ tool name.
 
 The package includes built-in tools under `src/Services/Mcp/Tools/ChatBot`.
 
-- `fetch-web-page`: Fetches readable text from a URL.
+- `fetch-web-page`: Fetches readable text from a URL. `GET` only, HTML and plain text only. Public hosts only unless told otherwise.
+- `http-request`: Issues a `GET`/`POST`/`PUT`/`PATCH`/`DELETE` request and returns the decoded response — JSON, XML, plain text, or HTML. See below.
+- `get-temporal-information`: Returns the current date and time, optionally in a given IANA timezone or UTC offset.
 - `scan-memories`: Searches stored user memories for relevant context.
 - `search-web`: Searches Bing, Google, DuckDuckGo, and Brave, then returns structured results plus markdown links/snippets.
 
@@ -547,6 +471,118 @@ To enable the web-search tool for a system, include `search-web` in `AiSystem::a
 - `markdown` containing clickable links and snippets.
 - `next_page_input` to continue searching on the next page.
 - Guidance for asking the model to inspect a specific link in depth.
+
+#### `get-temporal-information`
+
+A model's training data has a cutoff and the system prompt is static, so anything
+date-relative is otherwise answered from a guess. This tool returns the wall clock.
+
+Input:
+
+- `timezone` (optional): an IANA identifier (`America/New_York`) or a fixed UTC
+  offset (`-05:00`, `+0530`, `+5`). Defaults to `config('app.timezone')`. A value
+  that resolves as neither is an error rather than a silent fallback — a
+  confidently-wrong time the model then reasons from is worse than a refusal.
+
+The response carries `iso8601`, `utc_iso8601`, `timezone`, `utc_offset`,
+`unix_timestamp`, `date`, `time`, `day_of_week`, and `human`, so the model does no
+calendar arithmetic on a string.
+
+#### `fetch-web-page`
+
+Inputs: `url` (required), plus optional `keep_html`, `target_selector`,
+`truncate_content`, and `request_policy`.
+
+`request_policy` is the same idiom `http-request` uses, minus `allowed_methods` —
+this tool is GET-only:
+
+```jsonc
+"request_policy": {
+  "allow_private_hosts": false,          // default
+  "allowed_hosts": ["wiki.internal"]     // optional
+}
+```
+
+**Omitting it fetches public hosts only.** Reaching a loopback, link-local, or
+private-network address requires declaring `allow_private_hosts`. The declaration is
+optional; the permission is not.
+
+Redirects are re-validated hop by hop against the same policy, capped at five, and the
+response `url` reports the final destination.
+
+Note the difference from `http-request`, which *requires* its policy and refuses
+without one. The tools have different surfaces: `http-request` can change server state,
+so a missing policy there has no safe interpretation. `fetch-web-page` only reads, and
+"public hosts only" is an unambiguous safe default — so it applies that default rather
+than spending a round trip asking for a field whose value the caller already wanted.
+
+#### `http-request`
+
+Reach APIs and non-HTML resources. Use `fetch-web-page` for ordinary web pages.
+
+Input:
+
+- `url`, `method` (required): the request. `GET`, `POST`, `PUT`, `PATCH`, `DELETE`.
+- `request_policy` (**required**): the model's declared intent — see below.
+- `body` (optional): sent as-is; set a `Content-Type` header to describe it.
+- `headers` (optional): filtered, see below.
+- `keep_html`, `target_selector`, `truncate_content` (optional): as `fetch-web-page`.
+
+Responses are decoded by content type. JSON and XML come back as a structure, not a
+string; HTML and other `text/*` types come back as text; anything else (images, PDFs,
+`application/octet-stream`) is refused rather than base64-encoded into the transcript.
+A response too large to return whole is truncated and flagged, and an oversized
+structure is downgraded to truncated text rather than returned as broken JSON.
+
+**The model must declare a request policy, and the tool fails closed without one.**
+
+```jsonc
+{
+  "url": "https://api.example.com/v1/things",
+  "method": "GET",
+  "request_policy": {
+    "allowed_methods": ["GET"],      // required, non-empty
+    "allow_private_hosts": false,    // default false
+    "allowed_hosts": ["api.example.com"]  // optional
+  }
+}
+```
+
+A request with no policy is refused before the socket opens, with an error telling the
+model what to declare. A request outside the declared policy is refused against the
+policy it declared. Non-`http(s)` schemes are refused unconditionally — no policy can
+permit `file://`.
+
+**Redirects are not followed blindly.** Both tools disable automatic redirects and
+re-run the full policy check against every hop, capped at five, re-deriving credentials
+from each hop's own host. Each request also connects to the address that was checked,
+rather than resolving the host a second time.
+
+> **A declared policy is a guardrail, not a boundary.** It records intent in the
+> `AiLlmMessage` log and keeps requests from reaching internal services by accident, but
+> the caller declaring it is the model itself. **Keep these tools out of `allowed_tools`
+> for any bot that takes untrusted input**, and restrict outbound network access from
+> the PHP process rather than relying on the tool to police itself.
+
+**The model never supplies credentials.** `Authorization`, `Proxy-Authorization`,
+`Cookie`, `Host`, and the hop-by-hop headers are stripped from model-supplied headers
+and reported back in the response, so the model learns why its auth attempt did
+nothing. The package attaches credentials from config instead, matched on exact host:
+
+```php
+// config/code-talker.php
+'tools' => [
+    'http_request' => [
+        'credentials' => [
+            'api.example.com' => ['Authorization' => 'Bearer '.env('EXAMPLE_API_TOKEN')],
+        ],
+    ],
+],
+```
+
+Credentials are applied after filtering, so a configured credential can set a header
+the model is forbidden to set. The value never appears in the tool's inputs or its
+response.
 
 ### Injecting extra dependencies into tools
 
@@ -650,40 +686,78 @@ Memories are stored in `AiFeatureMemory` and scoped per user:
 | `domain_knowledge` | Facts about the user not covered by other data    |
 | `system_tuning`    | What worked well or poorly in this bot's approach |
 
-Memories are ranked by `confidence` and `times_reinforced` and injected into the system prompt under `## Learned Insights`. Memories can be reviewed and edited at `/admin/ai/memories`.
+Memories are ranked by `confidence` and `times_reinforced` and injected into the system prompt under `## Learned Insights`. Memories can be reviewed and edited through `AiMemoryManager` (see **Management Services**).
 
 To rebuild all memories for a feature from historical conversations:
 
 ```bash
-# Via admin UI at /admin/ai/memories — use the "Rebuild" action
-# Or via code:
 app(\Jvjvjv\CodeTalker\Services\AiMemoryService::class)->rebuildMemories('chat-bot:my-bot');
 ```
 
-## Admin Routes
+## Management Services
 
-The admin route group is registered under `/admin/ai/*` and uses the middleware
-defined in `code-talker.admin_middleware`, which defaults to `['web', 'auth', 'can:manage-ai-tools']`.
+The package registers no admin routes and ships no admin UI. Everything an admin
+screen needs is exposed as a service you call from your own controllers, commands,
+or tests, under `Jvjvjv\CodeTalker\Services\Management`.
 
-If your host app does not already provide that gate, wire it yourself or change
-`code-talker.admin_middleware` to the authorization middleware your application
-already uses.
+| Service                 | Responsibilities                                                                            |
+| ----------------------- | ------------------------------------------------------------------------------------------- |
+| `AiSystemManager`       | Create/update/delete/duplicate systems, sync feature defaults, list provider models          |
+| `AiSystemPromptManager` | Reusable system prompt CRUD, clearing references on delete                                   |
+| `AiChatBotManager`      | Chat bot CRUD, per-bot usage rollups, available systems, available tools                     |
+| `AiConversationManager` | Filter and search conversations, inspect one, queue usage backfill                           |
+| `AiMemoryManager`       | Memory CRUD, triage-ordered listing, per-feature rebuild                                     |
 
-All admin routes are under `/admin/ai` and require the `can:manage-ai-tools` gate (configurable via `admin_middleware`).
-
-| Prefix                     | Resource                                     |
-| -------------------------- | -------------------------------------------- |
-| `/admin/ai/systems`        | AI Systems CRUD + interaction log viewer     |
-| `/admin/ai/system-prompts` | Reusable system prompt CRUD                  |
-| `/admin/ai/chat-bots`      | Chat bot CRUD                                |
-| `/admin/ai/conversations`  | Conversation viewer + usage backfill trigger |
-| `/admin/ai/memories`       | Feature memory CRUD + per-feature rebuild    |
-
-Define the `manage-ai-tools` gate in your `AppServiceProvider` or `AuthServiceProvider`:
+Each manager validates its own input and throws `ValidationException` on bad data,
+so a controller can let Laravel render the errors as usual:
 
 ```php
-Gate::define('manage-ai-tools', fn ($user) => (bool) $user->is_admin);
+use Jvjvjv\CodeTalker\Services\Management\AiSystemManager;
+
+public function store(Request $request, AiSystemManager $systems)
+{
+    $system = $systems->create($request->all());
+
+    return redirect()->route('your.systems.index');
+}
 ```
+
+If you would rather validate in a form request, take the rules from the manager
+so the domain constraints stay in one place:
+
+```php
+public function rules(): array
+{
+    return AiSystemManager::createRules($this->all());
+}
+```
+
+Operations that have a side effect beyond the record report it, so you can build
+an accurate confirmation message:
+
+```php
+$deactivatedBots = $systems->delete($system);       // bots are deactivated, not deleted
+$orphanedSystems = $prompts->delete($prompt);       // systems have their prompt cleared
+```
+
+### What to be aware of
+
+- **`provider` and `model` are immutable** once a system exists. Changing either
+  would invalidate the stored capability flags with no way to detect it, so
+  `update()` ignores both. Create a new system instead.
+- **A feature has exactly one default system.** Assigning a feature default that
+  another system holds takes it from that system. `claimedFeatures()` tells you
+  which are already spoken for, optionally ignoring the system being edited.
+- **`config`, `credentials`, and `pricing_profile`** may be passed as JSON strings
+  or arrays; the manager decodes strings before persisting.
+- **`custom_system_prompt`** is not a column. Supplying it without a
+  `system_prompt_id` creates an `AiSystemPrompt` and links it.
+
+### Authorization
+
+Authorization is entirely yours — the services do not check it. `admin_middleware`
+remains in the config for host apps that kept a published copy of the old admin
+route file, and defaults to `['web', 'auth', 'can:manage-ai-tools']`.
 
 ## Scheduled Jobs
 

@@ -20,11 +20,18 @@ return [
     | Route Middleware
     |--------------------------------------------------------------------------
     |
-    | Middleware applied to the public chat routes and admin AI routes.
+    | Retained for host apps still loading a published copy of a removed
+    | package route file. The package registers no routes of its own.
     |
     */
 
     'middleware' => ['web'],
+
+    /*
+    | The package no longer registers admin routes. This key is retained for
+    | host apps still loading a published copy of the old admin route file,
+    | which reads it. New admin screens should declare their own middleware.
+    */
 
     'admin_middleware' => ['web', 'auth', 'can:manage-ai-tools'],
 
@@ -43,6 +50,19 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Feature Keys
+    |--------------------------------------------------------------------------
+    |
+    | The feature keys an AiSystem may be made the default for. Leave empty to
+    | accept any non-empty string. Populate it to have the management services
+    | validate feature defaults against a known list.
+    |
+    */
+
+    'feature_keys' => [],
+
+    /*
+    |--------------------------------------------------------------------------
     | Scheduled Jobs
     |--------------------------------------------------------------------------
     |
@@ -53,22 +73,17 @@ return [
 
     'schedule' => true,
 
-    /*
-    |--------------------------------------------------------------------------
-    | Inertia Components
-    |--------------------------------------------------------------------------
-    |
-    | The Inertia components the public chat pages render. Point these at your
-    | own component paths if your app does not use the defaults; the props
-    | passed to them are unchanged either way, and are documented under
-    | "Frontend Integration" in the README.
-    |
-    */
-
-    'inertia' => [
-        'components' => [
-            'chat_bot' => 'ai/ChatBot',
-            'chat_bots_index' => 'ai/ChatBotsIndex',
+    'services' => [
+        'brave' => [
+            'search_api_key' => env('BRAVE_SEARCH_API_KEY', ''),
+        ],
+        'bing' => [
+            'search_api_key' => env('BING_SEARCH_API_KEY', ''),
+            'endpoint' => env('BING_SEARCH_ENDPOINT', 'https://api.bing.microsoft.com/v7.0/search'),
+        ],
+        'google' => [
+            'search_api_key' => env('GOOGLE_SEARCH_API_KEY', ''),
+            'search_engine_id' => env('GOOGLE_SEARCH_ENGINE_ID', ''),
         ],
     ],
 
@@ -95,6 +110,43 @@ return [
         // ceiling is passed the turn is aborted and logged as an error. Set to
         // 0 (or a negative value) to disable the guard.
         'max_stream_seconds' => (int) env('CODE_TALKER_MAX_STREAM_SECONDS', 300),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Chat Bot Tools
+    |--------------------------------------------------------------------------
+    |
+    | Per-tool settings for the built-in chat-bot tools. Tools are still gated
+    | per system by AiSystem::allowed_tools; these entries configure a tool the
+    | model has already been granted.
+    |
+    | http_request.credentials maps a host to the headers the package attaches
+    | when requesting it. Credentials live here, and never in the model's tool
+    | inputs, so a token cannot be read, leaked, or invented by the model. Match
+    | is on the exact host, case-insensitively.
+    |
+    |     'credentials' => [
+    |         'api.example.com' => ['Authorization' => 'Bearer '.env('EXAMPLE_API_TOKEN')],
+    |         'files.internal'  => ['X-Api-Key' => env('INTERNAL_FILES_KEY')],
+    |     ],
+    |
+    | Security note: http-request requires the model to declare its own request
+    | policy and refuses a request without one. That makes intent explicit and
+    | auditable — it is NOT a defence against a prompt-injected model, which can
+    | declare a permissive policy. Keep http-request out of allowed_tools for
+    | any bot that takes untrusted input.
+    |
+    */
+
+    'tools' => [
+
+        'http_request' => [
+            'credentials' => [
+                //
+            ],
+        ],
+
     ],
 
     /*

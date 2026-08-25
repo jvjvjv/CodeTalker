@@ -24,10 +24,16 @@ class AiConversationMessage extends Model
 
     protected $fillable = [
         'ai_conversation_id',
+        'user_id',
         'role',
+        'agent',
         'content',
         'reasoning_content',
         'blocks',
+        'attachments',
+        'tool_calls',
+        'tool_results',
+        'usage',
         'metadata',
         'created_at',
     ];
@@ -36,6 +42,10 @@ class AiConversationMessage extends Model
     {
         return [
             'blocks' => 'array',
+            'attachments' => 'array',
+            'tool_calls' => 'array',
+            'tool_results' => 'array',
+            'usage' => 'array',
             'metadata' => 'array',
             'created_at' => 'datetime',
         ];

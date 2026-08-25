@@ -47,6 +47,16 @@ class TurnRecorder
                 'content' => $text,
                 'reasoning_content' => $reasoning !== '' ? $reasoning : null,
                 'blocks' => $blocks->toArray(),
+                // Persisted so the conversation store can replay this turn as a
+                // tool call plus its result. Without them, history reconstruction
+                // flattens a tool-using turn down to whatever text it happened to
+                // produce alongside the call.
+                'tool_calls' => $outcome->toolCalls !== [] ? $outcome->toolCalls : null,
+                'tool_results' => $outcome->toolResults !== [] ? $outcome->toolResults : null,
+                'usage' => [
+                    'prompt_tokens' => $inputTokens ?: null,
+                    'completion_tokens' => $outputTokens ?: null,
+                ],
                 'metadata' => [
                     'input_tokens' => $inputTokens ?: null,
                     'output_tokens' => $outputTokens ?: null,

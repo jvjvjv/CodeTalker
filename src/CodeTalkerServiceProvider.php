@@ -13,15 +13,16 @@ use Jvjvjv\CodeTalker\Mcp\Servers\CodeTalkerServer;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Observers\AiConversationObserver;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
+use Jvjvjv\CodeTalker\Services\Conversation\CodeTalkerConversationStore;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AiSystemProviderConfigurator;
 use Jvjvjv\CodeTalker\Services\ProviderModelsClient;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeContext;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeRecorder;
 use Jvjvjv\CodeTalker\Support\ToolContext;
 use Illuminate\Database\Eloquent\Factories\Factory;
-use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schedule;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Ai\Contracts\ConversationStore;
 use Laravel\Mcp\Facades\Mcp;
 
 class CodeTalkerServiceProvider extends ServiceProvider
@@ -110,6 +111,12 @@ class CodeTalkerServiceProvider extends ServiceProvider
         $this->app->singleton(RawExchangeContext::class);
         $this->app->singleton(RawExchangeRecorder::class);
 
+        // Replace laravel/ai's own conversation store so an agent resumed onto a
+        // conversation replays this package's history — with tool calls, tool
+        // results, and attachments intact — rather than the framework's tables,
+        // which this package never writes to.
+        $this->app->singleton(ConversationStore::class, CodeTalkerConversationStore::class);
+
         // Default ToolContext used when a tool is resolved outside the local chat
         // loop — primarily the external MCP server, where the authenticated caller
         // (not a conversation) supplies the user identity. The local loop overrides
@@ -139,20 +146,10 @@ class CodeTalkerServiceProvider extends ServiceProvider
             ),
         );
 
-        // Defer route registration until after all service providers (including the host
-        // app's RouteServiceProvider) have booted. This ensures specific literal routes
-        // like /login are registered before the root-level /{aiChatBot} wildcard.
-        // The Route::has() guards skip registration if the host app has already loaded
-        // its own versions of these route files.
+        // The package registers no routes of its own. MCP server registration
+        // still defers until every provider has booted, so a host's own routes
+        // are in place first.
         $this->app->booted(function (): void {
-            if (! Route::has('chat-bots.root.show')) {
-                $this->loadRoutesFrom($this->routeFilePath('codetalker-chatbots.php'));
-            }
-
-            if (! Route::has('admin.ai.index')) {
-                $this->loadRoutesFrom($this->routeFilePath('codetalker-admin.php'));
-            }
-
             $this->registerMcpServers();
         });
 
@@ -182,21 +179,8 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 __DIR__ . '/../database/migrations' => database_path('migrations'),
             ], 'code-talker-migrations');
 
-            $this->publishes([
-                __DIR__ . '/../routes/codetalker-chatbots.php' => base_path('routes/codetalker-chatbots.php'),
-                __DIR__ . '/../routes/codetalker-admin.php' => base_path('routes/codetalker-admin.php'),
-            ], 'code-talker-routes');
-
-            $this->publishes([
-                __DIR__ . '/../routes/codetalker-chatbots.php' => base_path('routes/codetalker-chatbots.php'),
-            ], 'code-talker-chatbot-routes');
-
-            $this->publishes([
-                __DIR__ . '/../routes/codetalker-admin.php' => base_path('routes/codetalker-admin.php'),
-            ], 'code-talker-admin-routes');
-
-            // TypeScript declarations for the Inertia props and stream events.
-            // These track the package, so they are safe to re-publish on upgrade.
+            // TypeScript declarations for the turn event vocabulary. These track
+            // the package, so they are safe to re-publish on upgrade.
             $this->publishes([
                 __DIR__ . '/../resources/js/types/code-talker.d.ts' => resource_path('js/types/code-talker.d.ts'),
             ], 'code-talker-types');
@@ -260,16 +244,5 @@ class CodeTalkerServiceProvider extends ServiceProvider
         if (config('code-talker.mcp.local.enabled', false)) {
             Mcp::local((string) config('code-talker.mcp.local.handle', 'code-talker'), CodeTalkerServer::class);
         }
-    }
-
-    protected function routeFilePath(string $filename): string
-    {
-        $publishedPath = base_path('routes/' . $filename);
-
-        if (is_file($publishedPath)) {
-            return $publishedPath;
-        }
-
-        return __DIR__ . '/../routes/' . $filename;
     }
 }

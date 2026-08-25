@@ -30,8 +30,8 @@ final class GoogleSearchEngine implements SearchEngine
 
     public function search(SearchQuery $query): EngineResults
     {
-        $apiKey = trim((string) config('services.google.search_api_key', env('GOOGLE_SEARCH_API_KEY', '')));
-        $engineId = trim((string) config('services.google.search_engine_id', env('GOOGLE_SEARCH_ENGINE_ID', '')));
+        $apiKey = trim((string) config('code-talker.services.google.search_api_key', ''));
+        $engineId = trim((string) config('code-talker.services.google.search_engine_id', ''));
 
         return $apiKey !== '' && $engineId !== ''
             ? $this->searchViaApi($query, $apiKey, $engineId)

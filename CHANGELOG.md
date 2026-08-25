@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.11.0] — 2026-08-25
+
+This release turns Code Talker into a pure library. The package no longer registers routes, ships controllers, or renders pages — a chat turn is a method call, and management is a service layer the host drives from its own screens. Conversation history is now read through `laravel/ai`'s `ConversationStore`, which is what unblocks attachment replay. Two new chat-bot tools round it out: general HTTP requests, and the current date and time.
+
+This is a large upgrade from 0.10.0. Read every entry under Breaking Changes first.
+
+### Breaking Changes
+- **All routes are removed.** The package registers no chat routes and no admin routes, and ships no route files. Hosts define their own routes and drive the services directly. The `code-talker-routes`, `code-talker-chatbot-routes`, and `code-talker-admin-routes` publish tags are gone.
+- **The admin controllers and form requests are removed**, along with `/admin/ai/*`. Rewrite host controllers against `Services/Management/` — `AiSystemManager`, `AiSystemPromptManager`, `AiChatBotManager`, `AiConversationManager`, `AiMemoryManager` — reusing each manager's static `rules()` (or `createRules()` / `updateRules()`) so validation stays in one place. `admin_middleware` remains in config for hosts still loading a published copy of the removed route file.
+- **`ChatBotController` and `SendAiChatBotMessageRequest` are removed**, along with `ConversationSessionStore`, `ChatBotAccessGuard`, `ChatBotRouteUrls`, `ConversationHistoryPresenter`, `ChatBotPagePayload`, `ChatBotIndexPayload`, and `ChatStreamResponse`. Start a turn with `AiChatBotConversationService::startConversation()` and drive it with `continueConversation()`.
+- **`continueConversation()` now yields structured event arrays, not pre-encoded SSE strings.** `SseFrameEncoder` owns the framing, so a host can deliver a turn over something other than SSE. The wire format itself is unchanged when you pipe it through the encoder.
+- **Resolving a conversation across requests is now the host's concern.** The session entry and the `ai_chat_bot_current` cookie are gone; use `findByChatHashOrUuid()`.
+- **Cancellation must be supplied when a turn runs outside a request.** The default reads `connection_aborted()`, which reports 0 in a queue or console context — a turn driven from there never cancels unless the host passes a signal to `usingCancellationCheck()`.
+- **`TranscriptBuilder` and `ConversationTranscript` are removed**, replaced by `Services/Conversation/CodeTalkerConversationStore`.
+- **A new migration is required.** `2026_08_16_000001_add_message_structure_to_ai_conversation_messages_table` adds `user_id`, `agent`, `attachments`, `tool_calls`, `tool_results`, and `usage`. Re-publish migrations and run them.
+- **The `inertia` config block is removed and `inertiajs/inertia-laravel` is no longer a dependency.** Hosts that render the chat pages keep their own components and install Inertia themselves.
+- **`fetch-web-page` now fetches public hosts only by default.** A URL whose host resolves to a loopback, link-local, or private-network address is refused unless the call declares `request_policy.allow_private_hosts`. A bot that reads pages on an internal network needs that declaration added. The tool also gains a fifth input, `request_policy`, and reports the final destination as `url` when a fetch redirects.
+- Only the Inertia page-prop half of the published TypeScript declarations is gone. The stream contract — `StreamTranslator`, the `ChatStreamEvent` union, and the `code-talker-types` and `code-talker-client` publish tags — is unchanged.
+
+### New Features
+- Added `Services/Management/`, five managers covering every operation the removed admin controllers performed, so the package ships management capability without shipping controllers or components.
+- Added `Services/Conversation/CodeTalkerConversationStore`, implementing `laravel/ai`'s `ConversationStore` over `ai_conversations` / `ai_conversation_messages` and bound over the framework default. History replays as real message objects — a user turn keeps its attachments, a tool-using turn replays as a call plus its result — where before it was flattened to bare user and assistant text.
+- `TurnRecorder` now persists tool calls, tool results, and usage, so recorded turns are replayable.
+- Added the `http-request` tool: `GET`/`POST`/`PUT`/`PATCH`/`DELETE` with an optional body, decoding JSON, XML, plain text, and HTML. JSON and XML come back as structures rather than strings; binary content types are refused rather than base64-encoded into the transcript.
+- Added the `get-temporal-information` tool, returning the current date and time in an optional IANA timezone or fixed UTC offset, with the calendar parts pre-computed.
+- Added `code-talker.tools.http_request.credentials`, a host-keyed map of request headers. `http-request` strips model-supplied authentication headers and attaches credentials from this config instead, so a token is never visible to, or inventable by, the model.
+- Both web tools accept an optional `request_policy` declaring which hosts a call may reach, enforced by one shared `Services/Web/HostGate`. `http-request` requires it; `fetch-web-page` defaults to public hosts only when it is omitted.
+- Both web tools re-check every redirect destination against the same policy instead of following redirects automatically, and connect to the address that was checked rather than resolving the host a second time.
+- Both new tools are registered on the external MCP server alongside `fetch-web-page`, `search-web`, and `scan-memories`.
+
+### Bug Fixes
+- `syncFeatureDefaults()` and the prompt-delete cascade now run in transactions. Both were multi-write with none, so a mid-way failure could leave a feature with no default system and `AgentFactory::forFeature()` throwing.
+- `feature_defaults` validates against `config('code-talker.feature_keys')` rather than hardcoded host-app feature names.
+- `duplicate()` no longer silently drops feature defaults; copying them is now an explicit argument.
+- `storeConversation()` throws a clear error rather than failing on a NOT NULL constraint when the contract cannot supply the required `AiSystem`.
+- Removed an unused `AiMemoryService` parameter, an unused import, and an `_id` key that read a camelCase property off a snake_case column.
+
+### Known Issues
+- A host that has already registered its own tool named `http-request` through `addToolDirectory()` will shadow the package's, because host directories are discovered after package ones. Check for the collision before upgrading.
+
 ## [0.10.0] — 2026-07-27
 
 This release restructures the three largest classes in the package — `ChatBotController`, `AiChatBotConversationService`, and `SearchWebTool` — into focused collaborators without changing any behavior, and documents the previously undocumented contract between the package's HTTP surface and a host app's chat UI. Host apps that only consume the package's routes, services, and tools need to change nothing; the one exception is noted below.

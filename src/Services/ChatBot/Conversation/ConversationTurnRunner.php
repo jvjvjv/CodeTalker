@@ -18,6 +18,7 @@ use Laravel\Ai\Streaming\Events\StreamEnd;
 use Laravel\Ai\Streaming\Events\StreamEvent;
 use Laravel\Ai\Streaming\Events\StreamStart;
 use Laravel\Ai\Streaming\Events\ToolCall as ToolCallEvent;
+use Laravel\Ai\Streaming\Events\ToolResult as ToolResultEvent;
 use RuntimeException;
 
 /**
@@ -79,6 +80,12 @@ class ConversationTurnRunner
         // its own budget rather than a shrinking share of the turn's.
         $stepStartedAt = $startedAt;
 
+        // Accumulated across continuation attempts, because the whole turn is
+        // persisted as a single assistant message. Resetting these per attempt
+        // would drop the tool activity of every attempt but the last.
+        $recordedToolCalls = [];
+        $recordedToolResults = [];
+
         for ($attempt = 0; $attempt < self::MAX_CONTINUATION_ATTEMPTS; $attempt++) {
             $attemptTurnNumber = $this->turns->labelFor($turnNumber, $attempt);
 
@@ -134,6 +141,10 @@ class ConversationTurnRunner
 
                     $events[] = $event;
 
+                    if ($event instanceof ToolResultEvent) {
+                        $recordedToolResults[] = $event->toolResult->toArray();
+                    }
+
                     // Each provider request (a continuation attempt, or an
                     // internal tool-call step within the same attempt) starts
                     // with its own StreamStart, so this is a fresh generation
@@ -171,6 +182,11 @@ class ConversationTurnRunner
                             'id' => $event->toolCall->id,
                             'name' => $event->toolCall->name,
                         ];
+
+                        // The full structures, kept so the conversation store
+                        // can rebuild this turn as a tool call plus its result
+                        // rather than flattening it to text.
+                        $recordedToolCalls[] = $event->toolCall->toArray();
                     }
 
                     foreach ($translator->translate($event) as $browserEvent) {
@@ -180,7 +196,7 @@ class ConversationTurnRunner
                             $blocks->append('reasoning', $browserEvent['delta']['reasoning']);
                         }
 
-                        yield 'data: ' . json_encode($browserEvent) . "\n\n";
+                        yield $browserEvent;
                     }
                 }
             } finally {
@@ -226,6 +242,8 @@ class ConversationTurnRunner
             maxDurationExceeded: $maxDurationExceeded,
             maxDurationMessage: $maxDurationMessage,
             durationMs: $durationMs,
+            toolCalls: $recordedToolCalls,
+            toolResults: $recordedToolResults,
         );
     }
 }
