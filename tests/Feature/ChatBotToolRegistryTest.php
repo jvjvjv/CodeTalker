@@ -18,12 +18,12 @@ class ChatBotToolRegistryTest extends TestCase
 
     public function test_to_api_tools_exposes_the_kebab_named_package_tools(): void
     {
-        $tools = $this->registry(['fetch-web-page', 'search-web', 'scan-memories'])->toApiTools();
+        $tools = $this->registry(['fetch-web-page', 'http-request', 'get-temporal-information', 'search-web', 'scan-memories'])->toApiTools();
 
         $byName = collect($tools)->keyBy('name');
 
         $this->assertEqualsCanonicalizing(
-            ['fetch-web-page', 'search-web', 'scan-memories'],
+            ['fetch-web-page', 'http-request', 'get-temporal-information', 'search-web', 'scan-memories'],
             $byName->keys()->all(),
         );
 
@@ -38,6 +38,8 @@ class ChatBotToolRegistryTest extends TestCase
         $this->assertArrayHasKey('url', $byName['fetch-web-page']['input_schema']['properties']);
         $this->assertArrayHasKey('query', $byName['search-web']['input_schema']['properties']);
         $this->assertArrayHasKey('topics', $byName['scan-memories']['input_schema']['properties']);
+        $this->assertArrayHasKey('request_policy', $byName['http-request']['input_schema']['properties']);
+        $this->assertArrayHasKey('timezone', $byName['get-temporal-information']['input_schema']['properties']);
     }
 
     /**
@@ -57,7 +59,7 @@ class ChatBotToolRegistryTest extends TestCase
         );
 
         $this->assertEqualsCanonicalizing(
-            ['fetch-web-page', 'search-web', 'scan-memories'],
+            ['fetch-web-page', 'http-request', 'get-temporal-information', 'search-web', 'scan-memories'],
             array_column($registry->toApiTools(), 'name'),
         );
     }

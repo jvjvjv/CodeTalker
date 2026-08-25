@@ -450,7 +450,9 @@ tool name.
 
 The package includes built-in tools under `src/Services/Mcp/Tools/ChatBot`.
 
-- `fetch-web-page`: Fetches readable text from a URL.
+- `fetch-web-page`: Fetches readable text from a URL. `GET` only, HTML and plain text only.
+- `http-request`: Issues a `GET`/`POST`/`PUT`/`PATCH`/`DELETE` request and returns the decoded response — JSON, XML, plain text, or HTML. See below.
+- `get-temporal-information`: Returns the current date and time, optionally in a given IANA timezone or UTC offset.
 - `scan-memories`: Searches stored user memories for relevant context.
 - `search-web`: Searches Bing, Google, DuckDuckGo, and Brave, then returns structured results plus markdown links/snippets.
 
@@ -469,6 +471,93 @@ To enable the web-search tool for a system, include `search-web` in `AiSystem::a
 - `markdown` containing clickable links and snippets.
 - `next_page_input` to continue searching on the next page.
 - Guidance for asking the model to inspect a specific link in depth.
+
+#### `get-temporal-information`
+
+A model's training data has a cutoff and the system prompt is static, so anything
+date-relative is otherwise answered from a guess. This tool returns the wall clock.
+
+Input:
+
+- `timezone` (optional): an IANA identifier (`America/New_York`) or a fixed UTC
+  offset (`-05:00`, `+0530`, `+5`). Defaults to `config('app.timezone')`. A value
+  that resolves as neither is an error rather than a silent fallback — a
+  confidently-wrong time the model then reasons from is worse than a refusal.
+
+The response carries `iso8601`, `utc_iso8601`, `timezone`, `utc_offset`,
+`unix_timestamp`, `date`, `time`, `day_of_week`, and `human`, so the model does no
+calendar arithmetic on a string.
+
+#### `http-request`
+
+Reach APIs and non-HTML resources. Use `fetch-web-page` for ordinary web pages.
+
+Input:
+
+- `url`, `method` (required): the request. `GET`, `POST`, `PUT`, `PATCH`, `DELETE`.
+- `request_policy` (**required**): the model's declared intent — see below.
+- `body` (optional): sent as-is; set a `Content-Type` header to describe it.
+- `headers` (optional): filtered, see below.
+- `keep_html`, `target_selector`, `truncate_content` (optional): as `fetch-web-page`.
+
+Responses are decoded by content type. JSON and XML come back as a structure, not a
+string; HTML and other `text/*` types come back as text; anything else (images, PDFs,
+`application/octet-stream`) is refused rather than base64-encoded into the transcript.
+A response too large to return whole is truncated and flagged, and an oversized
+structure is downgraded to truncated text rather than returned as broken JSON.
+
+**The model must declare a request policy, and the tool fails closed without one.**
+
+```jsonc
+{
+  "url": "https://api.example.com/v1/things",
+  "method": "GET",
+  "request_policy": {
+    "allowed_methods": ["GET"],      // required, non-empty
+    "allow_private_hosts": false,    // default false
+    "allowed_hosts": ["api.example.com"]  // optional
+  }
+}
+```
+
+A request with no policy is refused before the socket opens, with an error telling the
+model what to declare. A request outside the declared policy is refused against the
+policy it declared. Non-`http(s)` schemes are refused unconditionally — no policy can
+permit `file://`.
+
+**Redirects are not followed blindly.** Guzzle follows up to five redirects by
+default, which would let a permitted public URL bounce the request onto an internal
+address the gate never saw. `http-request` disables automatic redirects and re-runs
+the full gate against every hop, capped at five, re-deriving credentials from each
+hop's own host. `fetch-web-page` is unaffected and still follows redirects normally.
+
+> **Security: a self-declared policy is not a security boundary.** Requiring the model
+> to declare its intent stops *accidental* reach into your internal services and writes
+> that intent into the `AiLlmMessage` log, where it is auditable. It does not stop a
+> prompt-injected or adversarial model, which simply declares
+> `"allow_private_hosts": true`. **Keep `http-request` out of `allowed_tools` for any
+> bot that takes untrusted input**, and prefer running the app where internal services
+> are not reachable from the PHP process.
+
+**The model never supplies credentials.** `Authorization`, `Proxy-Authorization`,
+`Cookie`, `Host`, and the hop-by-hop headers are stripped from model-supplied headers
+and reported back in the response, so the model learns why its auth attempt did
+nothing. The package attaches credentials from config instead, matched on exact host:
+
+```php
+// config/code-talker.php
+'tools' => [
+    'http_request' => [
+        'credentials' => [
+            'api.example.com' => ['Authorization' => 'Bearer '.env('EXAMPLE_API_TOKEN')],
+        ],
+    ],
+],
+```
+
+Credentials are applied after filtering, so a configured credential can set a header
+the model is forbidden to set. The value never appears in the tool's inputs or its
+response.
 
 ### Injecting extra dependencies into tools
 

@@ -114,6 +114,43 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Chat Bot Tools
+    |--------------------------------------------------------------------------
+    |
+    | Per-tool settings for the built-in chat-bot tools. Tools are still gated
+    | per system by AiSystem::allowed_tools; these entries configure a tool the
+    | model has already been granted.
+    |
+    | http_request.credentials maps a host to the headers the package attaches
+    | when requesting it. Credentials live here, and never in the model's tool
+    | inputs, so a token cannot be read, leaked, or invented by the model. Match
+    | is on the exact host, case-insensitively.
+    |
+    |     'credentials' => [
+    |         'api.example.com' => ['Authorization' => 'Bearer '.env('EXAMPLE_API_TOKEN')],
+    |         'files.internal'  => ['X-Api-Key' => env('INTERNAL_FILES_KEY')],
+    |     ],
+    |
+    | Security note: http-request requires the model to declare its own request
+    | policy and refuses a request without one. That makes intent explicit and
+    | auditable — it is NOT a defence against a prompt-injected model, which can
+    | declare a permissive policy. Keep http-request out of allowed_tools for
+    | any bot that takes untrusted input.
+    |
+    */
+
+    'tools' => [
+
+        'http_request' => [
+            'credentials' => [
+                //
+            ],
+        ],
+
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | External MCP Server
     |--------------------------------------------------------------------------
     |

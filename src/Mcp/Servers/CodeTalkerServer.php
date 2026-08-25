@@ -3,6 +3,8 @@
 namespace Jvjvjv\CodeTalker\Mcp\Servers;
 
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\FetchWebPageTool;
+use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\GetTemporalInformationTool;
+use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\HttpRequestTool;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\ScanMemoriesTool;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\SearchWebTool;
 use Laravel\Mcp\Server;
@@ -12,7 +14,7 @@ use Laravel\Mcp\Server\Attributes\Version;
 
 #[Name('Code Talker')]
 #[Version('1.0.0')]
-#[Instructions('Exposes the Code Talker chat-bot tools — web fetching, multi-engine web search, and per-user memory recall.')]
+#[Instructions('Exposes the Code Talker chat-bot tools — web fetching, general HTTP requests, multi-engine web search, per-user memory recall, and the current date and time.')]
 class CodeTalkerServer extends Server
 {
     /**
@@ -26,7 +28,9 @@ class CodeTalkerServer extends Server
      */
     protected array $tools = [
         FetchWebPageTool::class,
+        HttpRequestTool::class,
         SearchWebTool::class,
         ScanMemoriesTool::class,
+        GetTemporalInformationTool::class,
     ];
 }

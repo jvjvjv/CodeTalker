@@ -208,7 +208,7 @@ class ManagementServicesTest extends TestCase
         // include_all overrides the allow-list entirely.
         $all = $manager->availableTools($system->id, includeAll: true);
         $this->assertEqualsCanonicalizing(
-            ['fetch-web-page', 'search-web', 'scan-memories'],
+            ['fetch-web-page', 'http-request', 'get-temporal-information', 'search-web', 'scan-memories'],
             array_column($all, 'name'),
         );
     }
