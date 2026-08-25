@@ -4,9 +4,7 @@
 
 This release turns Code Talker into a pure library. The package no longer registers routes, ships controllers, or renders pages — a chat turn is a method call, and management is a service layer the host drives from its own screens. Conversation history is now read through `laravel/ai`'s `ConversationStore`, which is what unblocks attachment replay. Two new chat-bot tools round it out: general HTTP requests, and the current date and time.
 
-**This bundles three separately planned releases (0.11, 0.12, 0.13) into one.** Nothing in between ever shipped, so there is no incremental upgrade path to take — a host moving off 0.10.0 absorbs all of it at once. Read every entry under Breaking Changes before upgrading.
-
-It stays a minor bump despite the breakage because the package is not yet 1.0.0-ready: the shape settled here — a library with no routes, no controllers, and no UI — is the shape 1.0.0 will stabilize, and it needs to be used in anger first. Treat every pre-1.0 minor as potentially breaking.
+This is a large upgrade from 0.10.0. Read every entry under Breaking Changes first.
 
 ### Breaking Changes
 - **All routes are removed.** The package registers no chat routes and no admin routes, and ships no route files. Hosts define their own routes and drive the services directly. The `code-talker-routes`, `code-talker-chatbot-routes`, and `code-talker-admin-routes` publish tags are gone.
@@ -28,7 +26,6 @@ It stays a minor bump despite the breakage because the package is not yet 1.0.0-
 - Added the `http-request` tool: `GET`/`POST`/`PUT`/`PATCH`/`DELETE` with an optional body, decoding JSON, XML, plain text, and HTML. JSON and XML come back as structures rather than strings; binary content types are refused rather than base64-encoded into the transcript.
 - Added the `get-temporal-information` tool, returning the current date and time in an optional IANA timezone or fixed UTC offset, with the calendar parts pre-computed.
 - Added `code-talker.tools.http_request.credentials`, a host-keyed map of request headers. `http-request` strips model-supplied authentication headers and attaches credentials from this config instead, so a token is never visible to, or inventable by, the model.
-- `fetch-web-page`'s fetching and extraction moved into `Services/Web/WebFetcher`, now shared with `http-request`. Its tool name, handler signature, response keys, and existing error strings are unchanged.
 - Both web tools accept an optional `request_policy` declaring which hosts a call may reach, enforced by one shared `Services/Web/HostGate`. `http-request` requires it; `fetch-web-page` defaults to public hosts only when it is omitted.
 - Both web tools re-check every redirect destination against the same policy instead of following redirects automatically, and connect to the address that was checked rather than resolving the host a second time.
 - Both new tools are registered on the external MCP server alongside `fetch-web-page`, `search-web`, and `scan-memories`.
