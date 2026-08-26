@@ -311,9 +311,23 @@ class AiChatBotConversationServiceTest extends TestCase
 
         $types = array_column($events, 'type');
 
-        // Tool activity is never forwarded to the browser.
+        // The raw provider ToolCall/ToolResult events are never forwarded —
+        // StreamTranslator doesn't know how to render their payloads — but a
+        // tool_use_progress frame is, so the browser sees that a tool ran.
         $this->assertNotContains('tool_call', $types);
+        $this->assertContains('tool_use_progress', $types);
         $this->assertSame(1, array_count_values($types)['message_start']);
+
+        $toolProgress = collect($events)->firstWhere('type', 'tool_use_progress');
+        $this->assertSame(['fetch-web-page'], $toolProgress['tools']);
+
+        // usingToolPayloads() was never called — arguments/results (which may
+        // carry whatever the model or a fetched page put in them) stay out of
+        // the frame by default.
+        $this->assertArrayNotHasKey('input', $toolProgress);
+        collect($events)
+            ->where('type', 'tool_use_progress')
+            ->each(fn (array $event) => $this->assertArrayNotHasKey('output', $event));
 
         $text = collect($events)
             ->where('type', 'content_block_delta')
@@ -332,6 +346,43 @@ class AiChatBotConversationServiceTest extends TestCase
         $eventTypes = array_column($response->response_data['events'], 'type');
         $this->assertContains('tool_call', $eventTypes);
         $this->assertContains('tool_result', $eventTypes);
+    }
+
+    public function test_using_tool_payloads_includes_arguments_and_result_on_the_progress_frames(): void
+    {
+        Queue::fake();
+        Http::fake([
+            'https://example.com/page' => Http::response(
+                '<html><head><title>Hi</title></head><body><p>Body text.</p></body></html>',
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8'],
+            ),
+        ]);
+
+        CodeTalkerAgent::fake([
+            new ToolCall('tool-1', 'fetch-web-page', ['url' => 'https://example.com/page']),
+            'Summary after reading the page',
+        ]);
+
+        $bot = $this->makeBot(
+            ['allowed_tools' => ['fetch-web-page']],
+            ['tools_enabled' => true],
+        );
+
+        $service = $this->app->make(AiChatBotConversationService::class)->usingToolPayloads();
+        $conversation = $service->startConversation($bot);
+
+        $events = $this->drainAndDecode($service->continueConversation($conversation, 'Read the page'));
+
+        $progressEvents = collect($events)->where('type', 'tool_use_progress')->values();
+
+        $callFrame = $progressEvents->first(fn (array $event) => array_key_exists('input', $event));
+        $this->assertNotNull($callFrame);
+        $this->assertSame(['url' => 'https://example.com/page'], $callFrame['input']);
+
+        $resultFrame = $progressEvents->first(fn (array $event) => array_key_exists('output', $event));
+        $this->assertNotNull($resultFrame);
+        $this->assertTrue($resultFrame['successful']);
     }
 
     public function test_a_runaway_stream_is_aborted_when_it_exceeds_the_max_duration(): void

@@ -154,6 +154,22 @@ return [
         'web_fetcher' => [
             'max_body_length' => (int) env('CODE_TALKER_MAX_BODY_LENGTH', 150000),
             'max_content_length' => (int) env('CODE_TALKER_MAX_CONTENT_LENGTH', 20000),
+
+            // The domain allow-list for a caller with no AiSystem at all —
+            // the external MCP server (Claude Desktop, etc.), which has no
+            // conversation and so no AiChatBot/AiSystem to carry its own
+            // web_tool_policy. Comma-separated hostnames, e.g.
+            // "api.example.com,1f916.ai". Empty means unrestricted, same as
+            // an AiSystem with no web_tool_policy. This is consulted only
+            // when there is no conversation; a chat-bot conversation's own
+            // AiSystem is always the sole authority for that call, never
+            // widened or narrowed by this. Required (with allow_domain
+            // membership) for an MCP caller to ever satisfy
+            // WebFetcher::allowsCredentialHeaders() — see the README.
+            'allowed_domains' => array_values(array_filter(array_map(
+                'trim',
+                explode(',', (string) env('CODE_TALKER_MCP_ALLOWED_DOMAINS', ''))
+            ))),
         ],
 
     ],

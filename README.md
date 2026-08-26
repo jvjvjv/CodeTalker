@@ -310,7 +310,14 @@ Every event carries a `type`. These are typed in the published declarations.
 | `reasoning_block_delta` | `delta.reasoning`                                            |
 | `message_delta`         | `delta.stop_reason`, `usage`                                 |
 | `message_stop`          | —                                                            |
+| `tool_use_progress`     | `text` (always `""`), `tools` (one tool name per event)      |
 | `error`                 | `message`, `reason` (`max_stream_duration`/`provider_error`) |
+
+`tool_use_progress` fires once per tool call the model makes mid-turn — the raw
+provider `ToolCall`/`ToolResult` events are never forwarded (their payloads
+aren't display text), so without this a turn calling a tool, especially one
+retrying after an error, streams nothing but silence between text/reasoning
+deltas.
 
 Encoded, each becomes `data: <json>\n\n`, and a turn that **finished** ends with
 `data: [DONE]\n\n`. An `error` event is terminal on its own and is *not*
@@ -526,7 +533,10 @@ Input:
 - `url`, `method` (required): the request. `GET`, `POST`, `PUT`, `PATCH`, `DELETE`.
 - `request_policy` (**required**): the model's declared intent — see below.
 - `body` (optional): sent as-is; set a `Content-Type` header to describe it.
-- `headers` (optional): filtered, see below.
+- `headers` (optional): a **string**, one header per line as `Name: value` — e.g.
+  `"Authorization: Bearer abc\nX-Request-Id: 123"` — not a nested object. A flat string
+  is far more reliable output for a small/local model's structured tool-calling than a
+  nested object is; filtered, see below.
 - `keep_html`, `target_selector`, `truncate_content` (optional): as `fetch-web-page`.
 
 Responses are decoded by content type. JSON and XML come back as a structure, not a
@@ -640,6 +650,22 @@ A model-supplied credential header:
 On an unrestricted system (no `web_tool_policy.allowed_domains`), `allow_credential_headers`
 has no effect — `Authorization`/`Cookie` are stripped exactly as before. `fetch-web-page`
 has no `headers` input at all, so this only applies to `http-request`.
+
+**The external MCP server has no `AiSystem` at all.** A call from Claude Desktop or any
+other MCP client resolves `ToolContext::forUser()` — no conversation, no `AiChatBot`, no
+`AiSystem`, so no `web_tool_policy` to consult. Without a fallback, `allow_credential_headers`
+would be permanently unreachable over that transport regardless of what an operator
+configures. `ToolContext::webToolPolicy()` falls back to a global config in exactly
+that one case — never when a conversation exists, since that AiSystem is always the
+sole authority for its own calls, including its choice to stay unrestricted:
+
+```dotenv
+CODE_TALKER_MCP_ALLOWED_DOMAINS=api.example.com,another.example.com
+```
+
+Set this to whatever domains your MCP-connected tools are meant to reach with a
+caller-supplied credential. Leaving it unset means MCP callers can never satisfy
+`allow_credential_headers`, same as before this config existed.
 
 ### Injecting extra dependencies into tools
 

@@ -508,11 +508,13 @@ class WebFetcher
      * Both conditions are required. `$policy->allowCredentialHeaders` is the
      * caller's own declaration and is not trusted alone — a caller acting on
      * injected instructions could declare it freely. `$this->policy->allowedDomains`
-     * is the AiSystem operator's own boundary, set outside the conversation
-     * entirely, and every hop of this request (including redirects) is
-     * already refused by HostGate unless it stays within that list — so once
-     * both hold, there is no host this request can reach that the operator
-     * did not approve.
+     * is the operator's own boundary — an AiSystem's `web_tool_policy` for the
+     * local chat loop, or the global `code-talker.tools.web_fetcher.allowed_domains`
+     * config for a caller with no AiSystem at all (see
+     * {@see \Jvjvjv\CodeTalker\Support\ToolContext::webToolPolicy()}) — and
+     * every hop of this request (including redirects) is already refused by
+     * HostGate unless it stays within that list. So once both hold, there is
+     * no host this request can reach that the operator did not approve.
      */
     private function allowsCredentialHeaders(RequestPolicy $policy): bool
     {
