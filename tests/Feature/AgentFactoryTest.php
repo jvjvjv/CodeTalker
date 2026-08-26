@@ -118,4 +118,60 @@ class AgentFactoryTest extends TestCase
             'seed' => 7,
         ], $agent->providerOptions('anthropic'));
     }
+
+    public function test_agent_show_thinking_mirrors_enable_thinking(): void
+    {
+        $enabled = $this->makeSystem([
+            'provider' => 'lm-studio',
+            'base_url' => 'http://localhost:1234',
+            'model' => 'qwen/qwen3.6-35b-a3b',
+            'enable_thinking' => true,
+        ]);
+
+        $disabled = $this->makeSystem([
+            'provider' => 'lm-studio',
+            'base_url' => 'http://localhost:1234',
+            'model' => 'qwen/qwen3.6-35b-a3b',
+            'enable_thinking' => false,
+        ]);
+
+        $this->assertTrue($this->factory->forSystem($enabled)->showThinking());
+        $this->assertFalse($this->factory->forSystem($disabled)->showThinking());
+    }
+
+    public function test_lm_studio_reasoning_param_is_sent_only_when_the_model_reports_reasoning_support(): void
+    {
+        $reasoningModel = $this->makeSystem([
+            'provider' => 'lm-studio',
+            'base_url' => 'http://localhost:1234',
+            'model' => 'qwen/qwen3.6-35b-a3b',
+            'enable_thinking' => false,
+            'model_capabilities' => ['reasoning' => true],
+        ]);
+
+        $this->assertSame(
+            ['reasoning' => 'off'],
+            $this->factory->forSystem($reasoningModel)->providerOptions('lm-studio'),
+        );
+
+        $unknownCapability = $this->makeSystem([
+            'provider' => 'lm-studio',
+            'base_url' => 'http://localhost:1234',
+            'model' => 'some-other-model',
+            'enable_thinking' => true,
+            'model_capabilities' => ['reasoning' => null],
+        ]);
+
+        $this->assertSame([], $this->factory->forSystem($unknownCapability)->providerOptions('lm-studio'));
+
+        $nonReasoningModel = $this->makeSystem([
+            'provider' => 'lm-studio',
+            'base_url' => 'http://localhost:1234',
+            'model' => 'some-other-model',
+            'enable_thinking' => true,
+            'model_capabilities' => ['reasoning' => false],
+        ]);
+
+        $this->assertSame([], $this->factory->forSystem($nonReasoningModel)->providerOptions('lm-studio'));
+    }
 }

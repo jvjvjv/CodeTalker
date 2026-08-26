@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.12.1] — 2026-08-26
+
+### Bug Fixes
+- `AiSystem.enable_thinking = false` is now actually enforced. Previously the flag was stored but reasoning content still reached the chat UI regardless, and LM Studio was never told to disable reasoning on its end.
+
 ## [0.12.0] — 2026-08-26
 
 ### New Features

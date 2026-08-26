@@ -59,6 +59,7 @@ class AgentFactory
             maxSteps: $maxSteps,
             timeout: $this->timeoutFor($provider, $system),
             providerOptions: $this->providerOptionsFor($provider, $system, $resolvedMaxTokens),
+            showThinking: (bool) $system->enable_thinking,
         );
     }
 
@@ -135,6 +136,16 @@ class AgentFactory
             && $maxTokens > 1024
         ) {
             $options['thinking'] = ['type' => 'enabled', 'budget_tokens' => 1024];
+        }
+
+        // Best-effort: LM Studio's native REST API accepts a `reasoning`
+        // request field ("off"/"low"/"medium"/"high"/"on") and errors if the
+        // model doesn't support it. Only send it for models LM Studio itself
+        // reported as reasoning-capable, and only as a hint — the gateway's
+        // showThinking() gate is what reliably keeps disabled reasoning out
+        // of the chat UI regardless of whether the model server honors this.
+        if ($provider === AiProvider::LmStudio && Arr::get($system->model_capabilities ?? [], 'reasoning') === true) {
+            $options['reasoning'] = $system->enable_thinking ? 'on' : 'off';
         }
 
         // Raw provider-parameter passthrough (e.g. lm-studio's frequency_penalty,
