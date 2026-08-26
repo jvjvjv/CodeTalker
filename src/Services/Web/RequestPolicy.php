@@ -25,6 +25,7 @@ final class RequestPolicy
         public readonly array $allowedMethods,
         public readonly bool $allowPrivateHosts,
         public readonly array $allowedHosts,
+        public readonly bool $allowCredentialHeaders = false,
     ) {}
 
     /**
@@ -38,6 +39,12 @@ final class RequestPolicy
             allowedMethods: self::normalizeList($input['allowed_methods'] ?? [], strtoupper(...)),
             allowPrivateHosts: ($input['allow_private_hosts'] ?? false) === true,
             allowedHosts: self::normalizeList($input['allowed_hosts'] ?? [], strtolower(...)),
+            // Declaring this alone is not sufficient — WebFetcher also
+            // requires the AiSystem's own web_tool_policy.allowed_domains to
+            // be non-empty, an operator-set boundary the model cannot
+            // negotiate by also declaring allowed_hosts here. See
+            // WebFetcher::allowsCredentialHeaders().
+            allowCredentialHeaders: ($input['allow_credential_headers'] ?? false) === true,
         );
     }
 

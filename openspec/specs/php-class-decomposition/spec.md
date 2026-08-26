@@ -7,11 +7,25 @@ TBD - created by archiving change refactor-large-php-classes. Update Purpose aft
 
 Oversized package classes SHALL be decomposed into collaborators placed in a namespace that identifies the class they were extracted from, rather than into a generic bucket. Collaborators for HTTP chat-bot flow SHALL live under `Jvjvjv\CodeTalker\Services\ChatBot\`, collaborators for the conversation turn under `Jvjvjv\CodeTalker\Services\ChatBot\Conversation\`, and collaborators for the `search-web` tool under `Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\SearchWeb\`. Single-use collaborators SHALL still get their own file.
 
+A collaborator shared by more than one class has no single origin class, and SHALL instead live in a namespace named for the capability it provides, as a sibling of the package's other service namespaces. A shared collaborator SHALL NOT be placed inside a directory registered as a tool directory, because `DiscoversAiToolHandlers` walks those recursively and any class there that extends `Laravel\Mcp\Server\Tool` or implements `AiToolHandlerContract` registers itself as a tool.
+
 #### Scenario: A responsibility is extracted from a large class
 
 - **WHEN** a distinct responsibility is lifted out of `ChatBotController`, `AiChatBotConversationService`, or `SearchWebTool`
 - **THEN** it is placed in one file in the namespace named for its origin class
 - **AND** it is placed there even if it has exactly one caller
+
+#### Scenario: A responsibility is extracted for use by more than one class
+
+- **WHEN** the fetch-and-extract logic is lifted out of `FetchWebPageTool` so that both `fetch-web-page` and `http-request` can use it
+- **THEN** it is placed under `Jvjvjv\CodeTalker\Services\Web\`, named for the capability rather than for `FetchWebPageTool`
+- **AND** it is not placed under `Services/Mcp/Tools/ChatBot/`
+
+#### Scenario: A shared collaborator does not become a phantom tool
+
+- **WHEN** `ChatBotToolRegistry` discovers tools across the package and host-registered tool directories
+- **THEN** the discovered tool set contains no shared collaborator class
+- **AND** the set is exactly the tools declared with a `#[Name]` attribute
 
 #### Scenario: Value objects follow the package's existing style
 
@@ -44,6 +58,20 @@ The refactor SHALL NOT change any signature that code outside the refactored cla
 - **WHEN** the MCP layer inspects `SearchWebTool`
 - **THEN** its `#[Name('search-web')]` and `#[Description]` attributes, `schema(JsonSchema $schema): array`, and `handle(Request $request): Response|ResponseFactory` are unchanged
 - **AND** its constructor still takes a single `ToolContext`
+
+#### Scenario: Fetch tool keeps its MCP contract
+
+- **WHEN** the MCP layer inspects `FetchWebPageTool`
+- **THEN** its `#[Name('fetch-web-page')]` attribute, `schema(JsonSchema $schema): array`, and `handle(Request $request): Response|ResponseFactory` are unchanged
+- **AND** its inputs are `url`, `keep_html`, `truncate_content`, `target_selector`, and `request_policy`
+- **AND** the four inputs other than `request_policy` keep the names, types, and meanings they had before
+- **AND** its constructor still takes a single `ToolContext`
+
+#### Scenario: Fetch tool behavior is unchanged for public pages
+
+- **WHEN** `fetch-web-page` fetches a page on a public host, with or without a declared `request_policy`
+- **THEN** the successful response keys remain `url`, `title`, `content_type`, `content`, and `truncated`
+- **AND** the error strings for an invalid URL, an empty body, a non-HTML content type, an unmatched selector, a connection failure, and a failed HTTP status are byte-identical to the ones the tool returned in 0.10.0
 
 ### Requirement: The browser SSE wire format is unchanged
 

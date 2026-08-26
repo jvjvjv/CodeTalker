@@ -47,6 +47,11 @@ class ConversationTurnRunner
     /**
      * Yields browser SSE frames and returns how the turn ended.
      *
+     * @param bool $includeToolPayloads whether `tool_use_progress` frames carry
+     *        the tool's raw arguments/result. Off by default — arguments and
+     *        results can carry whatever the model or a scraped page put in
+     *        them, which is not something to expose to every browser by
+     *        default. A host typically only turns this on outside production.
      * @return Generator<int, string, mixed, TurnOutcome>
      */
     public function run(
@@ -60,6 +65,7 @@ class ConversationTurnRunner
         int $turnNumber,
         float $startedAt,
         ?string $systemPrompt,
+        bool $includeToolPayloads = false,
     ): Generator {
         $system = $conversation->aiSystem;
         $resolvedModel = $system->model;
@@ -143,6 +149,16 @@ class ConversationTurnRunner
 
                     if ($event instanceof ToolResultEvent) {
                         $recordedToolResults[] = $event->toolResult->toArray();
+
+                        if ($includeToolPayloads) {
+                            yield [
+                                'type' => 'tool_use_progress',
+                                'text' => '',
+                                'tools' => [$event->toolResult->name],
+                                'output' => $event->toolResult->result,
+                                'successful' => $event->successful,
+                            ];
+                        }
                     }
 
                     // Each provider request (a continuation attempt, or an
@@ -187,6 +203,21 @@ class ConversationTurnRunner
                         // can rebuild this turn as a tool call plus its result
                         // rather than flattening it to text.
                         $recordedToolCalls[] = $event->toolCall->toArray();
+
+                        // Browser-visible only — StreamTranslator deliberately
+                        // never forwards ToolCall/ToolResult events (they carry
+                        // provider-shaped payloads, not display text), which
+                        // otherwise leaves a multi-tool-call turn showing
+                        // nothing but silence between reasoning/text deltas.
+                        // Mirrors the same frame TargetedResumeService's own
+                        // turn loop already emits, so the frontend needs no
+                        // changes — see ChatInterface.tsx's ToolUseProgressEvent.
+                        yield [
+                            'type' => 'tool_use_progress',
+                            'text' => '',
+                            'tools' => [$event->toolCall->name],
+                            ...($includeToolPayloads ? ['input' => $event->toolCall->arguments] : []),
+                        ];
                     }
 
                     foreach ($translator->translate($event) as $browserEvent) {

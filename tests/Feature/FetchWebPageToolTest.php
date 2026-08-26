@@ -7,6 +7,7 @@ use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
 use Jvjvjv\CodeTalker\Models\AiChatBot;
 use Jvjvjv\CodeTalker\Models\AiConversation;
+use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\Mcp\ToolResultConverter;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\FetchWebPageTool;
 use Jvjvjv\CodeTalker\Services\Web\HostGate;
@@ -44,7 +45,7 @@ class FetchWebPageToolTest extends TestCase
                     }
                 };
 
-                return new WebFetcher($gate, $this->context->botName(), 'fetch-web-page');
+                return new WebFetcher($gate, $this->context->botName(), 'fetch-web-page', $this->context->webToolPolicy());
             }
         };
     }
@@ -183,6 +184,43 @@ class FetchWebPageToolTest extends TestCase
         $this->assertSame(25000, mb_strlen($result['content']));
     }
 
+    public function testAConfiguredContentLengthCapIsRespected(): void
+    {
+        config(['code-talker.tools.web_fetcher.max_content_length' => 500]);
+
+        $longParagraph = str_repeat('a', 25000);
+
+        Http::fake([
+            'https://example.com/long' => Http::response(
+                '<html><head><title>Long</title></head><body><p>' . $longParagraph . '</p></body></html>',
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8'],
+            ),
+        ]);
+
+        $tool = $this->tool();
+
+        $result = $this->runTool($tool, ['url' => 'https://example.com/long']);
+
+        $this->assertTrue($result['truncated']);
+        $this->assertSame(500, mb_strlen($result['content']));
+    }
+
+    public function testAConfiguredBodyLengthCapIsRespected(): void
+    {
+        config(['code-talker.tools.web_fetcher.max_body_length' => 100]);
+
+        Http::fake([
+            'https://example.com/plain' => Http::response(str_repeat('a', 25000), 200, ['Content-Type' => 'text/plain']),
+        ]);
+
+        $tool = $this->tool();
+
+        $result = $this->runTool($tool, ['url' => 'https://example.com/plain']);
+
+        $this->assertSame(100, mb_strlen($result['content']));
+    }
+
     public function testItHandlesPlainTextResponses(): void
     {
         Http::fake([
@@ -260,6 +298,23 @@ class FetchWebPageToolTest extends TestCase
 
         $this->assertStringContainsString('other.example.com', $result['error']);
         $this->assertStringContainsString('allowed_hosts', $result['error']);
+        Http::assertNothingSent();
+    }
+
+    public function testARequestToADomainOutsideAScopedSystemsAllowListIsRefused(): void
+    {
+        $conversation = new AiConversation(['context' => []]);
+        $chatBot = new AiChatBot(['name' => 'Scoped Bot']);
+        $chatBot->setRelation('aiSystem', new AiSystem(['web_tool_policy' => ['allowed_domains' => ['allowed.example.com']]]));
+        $conversation->setRelation('aiChatBot', $chatBot);
+
+        Http::fake();
+
+        $result = $this->runTool($this->tool(ToolContext::forConversation($conversation)), [
+            'url' => 'https://example.com/page',
+        ]);
+
+        $this->assertStringContainsString('not on this system', $result['error']);
         Http::assertNothingSent();
     }
 

@@ -35,6 +35,9 @@ class AiChatBotConversationService
     /** @var (callable(): bool)|null */
     private $cancellationCheck = null;
 
+    /** @see usingToolPayloads() */
+    private bool $includeToolPayloads = false;
+
     private TurnSequence $turns;
 
     private ConversationTurnRunner $turnRunner;
@@ -196,6 +199,7 @@ class AiChatBotConversationService
                 $turnNumber,
                 $startTime,
                 $systemPrompt,
+                $this->includeToolPayloads,
             );
 
             $this->turnRecorder->recordCompletedTurn(
@@ -265,6 +269,25 @@ class AiChatBotConversationService
     public function usingCancellationCheck(callable $check): static
     {
         $this->cancellationCheck = $check;
+
+        return $this;
+    }
+
+    /**
+     * Include each tool call's raw arguments and result on the browser-visible
+     * `tool_use_progress` frames, instead of just the tool's name.
+     *
+     * Off by default: a tool's arguments/result can carry whatever the model
+     * or a page it fetched put in them — including, since a host may have
+     * enabled `allow_credential_headers`, a credential the model was handling
+     * on the caller's behalf. That is not something to expose to every
+     * browser by default. A host typically calls this only outside
+     * production, e.g. `if (! app()->environment('production')) { ... }`,
+     * as a debugging aid.
+     */
+    public function usingToolPayloads(bool $include = true): static
+    {
+        $this->includeToolPayloads = $include;
 
         return $this;
     }

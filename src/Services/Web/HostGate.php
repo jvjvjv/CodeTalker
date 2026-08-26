@@ -34,8 +34,13 @@ class HostGate
 
     /**
      * A caller-facing refusal, or null when the request may proceed.
+     *
+     * @param array<int, string>|null $allowedDomains an AiSystem-scoped allow-list;
+     *        null or empty means unrestricted. Checked before DNS resolution and
+     *        ahead of the model-declared policy, since it is an operator-set
+     *        boundary rather than a guardrail the model can negotiate.
      */
-    public function refuse(string $url, string $method, RequestPolicy $policy): ?string
+    public function refuse(string $url, string $method, RequestPolicy $policy, ?array $allowedDomains = null): ?string
     {
         if (trim($url) === '') {
             return 'A URL is required.';
@@ -47,6 +52,14 @@ class HostGate
         // Not policy-negotiable: no legitimate declaration wants file://.
         if (!in_array($scheme, ['http', 'https'], true) || $host === '') {
             return 'The URL must be a valid http or https address.';
+        }
+
+        if ($allowedDomains !== null && $allowedDomains !== [] && !in_array($host, array_map('strtolower', $allowedDomains), true)) {
+            return sprintf(
+                'This request was not sent. The host "%s" is not on this system\'s allowed domain list: %s.',
+                $host,
+                implode(', ', $allowedDomains),
+            );
         }
 
         if (!$policy->permits($method)) {

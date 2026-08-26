@@ -20,7 +20,14 @@ use Laravel\Mcp\Server\Tool;
     . 'Use this for APIs and non-HTML resources; use fetch-web-page for reading an ordinary web page. '
     . 'You MUST supply request_policy declaring the methods you intend to use, and whether you intend '
     . 'to reach private or loopback hosts. A request with no declared policy is refused before it is sent. '
-    . 'Do not send credentials: authentication headers are stripped, and the host supplies any that are needed.'
+    . 'Authentication headers (Authorization, Cookie) are stripped by default; the host usually supplies '
+    . 'any that are needed. If you have been given a credential to use directly (e.g. one the user provided '
+    . 'in conversation), TWO THINGS ARE BOTH REQUIRED, not just one: declare '
+    . 'request_policy.allow_credential_headers: true, AND add the header as its own line in the headers '
+    . 'input, e.g. headers: "Authorization: Bearer <the token you were given>". Declaring '
+    . 'allow_credential_headers alone sends nothing — it only lifts the block on a header you still have to '
+    . 'include yourself. This also only works when this system is restricted to specific domains; it is '
+    . 'refused otherwise regardless of what you declare.'
 )]
 class HttpRequestTool extends Tool
 {
@@ -62,6 +69,14 @@ class HttpRequestTool extends Tool
                 'allowed_hosts' => $schema->array()
                     ->items($schema->string())
                     ->description('Optional. When given, the request is refused unless the URL host is in this list.'),
+                'allow_credential_headers' => $schema->boolean()
+                    ->description(
+                        'Set true only when you are ALSO putting an Authorization or Cookie header in the headers '
+                        . 'input on this same call — this flag by itself sends nothing; it only permits a header you '
+                        . 'still have to include yourself. It is honored only when this AiSystem has been restricted '
+                        . 'to specific domains by its operator — on an unrestricted system, credential headers are '
+                        . 'stripped regardless of this declaration.'
+                    ),
             ])
                 ->description(
                     'Required. Your declared intent for this request. The request is refused when this is missing, '
@@ -70,15 +85,20 @@ class HttpRequestTool extends Tool
                 ->required(),
             'body' => $schema->string()
                 ->description('Optional request body, sent as-is. Set a Content-Type header to describe it.'),
-            'headers' => $schema->object()
+            'headers' => $schema->string()
                 ->description(
-                    'Optional request headers. Authentication headers (Authorization, Cookie) and connection '
-                    . 'headers are stripped and reported back; the host supplies credentials from its own config.'
+                    'Optional request headers, one per line, formatted as "Name: value" — for example '
+                    . '"Authorization: Bearer <token>\nX-Request-Id: abc123". A plain string, not a nested object — '
+                    . 'append the exact line for each header you need. Connection-management headers (Host, '
+                    . 'Connection, Proxy-Authorization, ...) are always stripped. Authorization and Cookie need '
+                    . 'BOTH a line here AND request_policy.allow_credential_headers: true on this same call — '
+                    . 'setting only one of the two sends nothing. Check the response\'s stripped_headers field if '
+                    . 'a header you expected to be sent is missing from the result.'
                 ),
             'keep_html' => $schema->boolean()
                 ->description('Indicate whether HTML should be kept or stripped. Only works for HTML responses.'),
             'truncate_content' => $schema->boolean()
-                ->description('Indicate whether content should be truncated at ' . WebFetcher::MAX_CONTENT_LENGTH . ' bytes.'),
+                ->description('Indicate whether content should be truncated at ' . WebFetcher::maxContentLength() . ' bytes.'),
             'target_selector' => $schema->string()
                 ->description('Selector to target; everything outside of that target_selector will be trimmed. Only works for HTML responses.'),
         ];
@@ -103,7 +123,7 @@ class HttpRequestTool extends Tool
             url: $url,
             policy: RequestPolicy::declared($declared),
             body: $this->bodyFrom($request),
-            headers: (array) ($request->get('headers') ?? []),
+            headers: $this->parseHeaderLines((string) ($request->get('headers') ?? '')),
             keepHtml: (bool) $request->get('keep_html', false),
             targetSelector: trim((string) $request->get('target_selector', '')),
             truncate: (bool) $request->get('truncate_content', true),
@@ -141,7 +161,12 @@ class HttpRequestTool extends Tool
      */
     protected function fetcher(): WebFetcher
     {
-        return new WebFetcher(new HostGate(self::PRIVATE_HOST_MESSAGE), $this->context->botName(), 'http-request');
+        return new WebFetcher(
+            new HostGate(self::PRIVATE_HOST_MESSAGE),
+            $this->context->botName(),
+            'http-request',
+            $this->context->webToolPolicy(),
+        );
     }
 
     /**
@@ -178,5 +203,37 @@ class HttpRequestTool extends Tool
         }
 
         return is_array($body) ? (string) json_encode($body) : (string) $body;
+    }
+
+    /**
+     * Parses "Name: value" lines into a header map. A flat string field is
+     * dramatically more reliable for a small/local model's structured
+     * function-calling output than a nested object, which was observed
+     * dropping its content (an empty {} where a header was intended) even
+     * when the same model correctly wrote out the equivalent JSON when just
+     * asked to describe the call in prose rather than actually emit it.
+     *
+     * @return array<string, string>
+     */
+    private function parseHeaderLines(string $text): array
+    {
+        $headers = [];
+
+        foreach (preg_split('/\r\n|\r|\n/', $text) ?: [] as $line) {
+            $colon = strpos($line, ':');
+
+            if ($colon === false) {
+                continue;
+            }
+
+            $name = trim(substr($line, 0, $colon));
+            $value = trim(substr($line, $colon + 1));
+
+            if ($name !== '') {
+                $headers[$name] = $value;
+            }
+        }
+
+        return $headers;
     }
 }

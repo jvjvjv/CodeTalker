@@ -7,6 +7,7 @@ use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
 use Jvjvjv\CodeTalker\Models\AiChatBot;
 use Jvjvjv\CodeTalker\Models\AiConversation;
+use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\Mcp\ToolResultConverter;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\HttpRequestTool;
 use Jvjvjv\CodeTalker\Services\Web\HostGate;
@@ -24,13 +25,19 @@ class HttpRequestToolTest extends TestCase
      * Hosts not listed resolve to a public address; the private cases are
      * declared explicitly.
      */
-    private function tool(?string $botName = null): HttpRequestTool
+    private function tool(?string $botName = null, ?AiSystem $aiSystem = null): HttpRequestTool
     {
         $context = new ToolContext();
 
-        if ($botName !== null) {
+        if ($botName !== null || $aiSystem !== null) {
             $conversation = new AiConversation(['context' => []]);
-            $conversation->setRelation('aiChatBot', new AiChatBot(['name' => $botName]));
+            $chatBot = new AiChatBot(['name' => $botName]);
+
+            if ($aiSystem !== null) {
+                $chatBot->setRelation('aiSystem', $aiSystem);
+            }
+
+            $conversation->setRelation('aiChatBot', $chatBot);
             $context = ToolContext::forConversation($conversation);
         }
 
@@ -52,7 +59,7 @@ class HttpRequestToolTest extends TestCase
                     }
                 };
 
-                return new WebFetcher($gate, $this->context->botName(), 'http-request');
+                return new WebFetcher($gate, $this->context->botName(), 'http-request', $this->context->webToolPolicy());
             }
         };
     }
@@ -61,9 +68,9 @@ class HttpRequestToolTest extends TestCase
      * @param array<string, mixed> $input
      * @return array<string, mixed>
      */
-    private function runTool(array $input, ?string $botName = null): array
+    private function runTool(array $input, ?string $botName = null, ?AiSystem $aiSystem = null): array
     {
-        return ToolResultConverter::toArray($this->tool($botName)->handle(new Request($input)));
+        return ToolResultConverter::toArray($this->tool($botName, $aiSystem)->handle(new Request($input)));
     }
 
     /**
@@ -110,7 +117,7 @@ class HttpRequestToolTest extends TestCase
         $result = $this->runTool($this->input([
             'method' => 'POST',
             'body' => '{"name":"second"}',
-            'headers' => ['Content-Type' => 'application/json'],
+            'headers' => "Content-Type: application/json",
             'request_policy' => ['allowed_methods' => ['GET', 'POST']],
         ]));
 
@@ -249,7 +256,7 @@ class HttpRequestToolTest extends TestCase
         Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
 
         $result = $this->runTool($this->input([
-            'headers' => ['Authorization' => 'Bearer model-invented-token', 'Cookie' => 'session=1'],
+            'headers' => "Authorization: Bearer model-invented-token\nCookie: session=1",
         ]));
 
         Http::assertSent(fn (HttpRequest $request): bool => !$request->hasHeader('Authorization') && !$request->hasHeader('Cookie'));
@@ -263,7 +270,7 @@ class HttpRequestToolTest extends TestCase
         Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
 
         $result = $this->runTool($this->input([
-            'headers' => ['X-Request-Id' => 'abc-123', 'Accept' => 'application/json'],
+            'headers' => "X-Request-Id: abc-123\nAccept: application/json",
         ]));
 
         Http::assertSent(function (HttpRequest $request): bool {
@@ -278,7 +285,7 @@ class HttpRequestToolTest extends TestCase
     {
         Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
 
-        $this->runTool($this->input(['headers' => ['User-Agent' => 'definitely-a-real-browser']]), 'Research Bot');
+        $this->runTool($this->input(['headers' => 'User-Agent: definitely-a-real-browser']), 'Research Bot');
 
         Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader(
             'User-Agent',
@@ -296,7 +303,7 @@ class HttpRequestToolTest extends TestCase
 
         Http::fake(['https://api.example.com/*' => Http::response('{"ok":true}', 200, ['Content-Type' => 'application/json'])]);
 
-        $result = $this->runTool($this->input(['headers' => ['Authorization' => 'Bearer model-invented-token']]));
+        $result = $this->runTool($this->input(['headers' => 'Authorization: Bearer model-invented-token']));
 
         Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader(
             'Authorization',
@@ -317,6 +324,268 @@ class HttpRequestToolTest extends TestCase
         $this->runTool($this->input(['url' => 'https://other.example.com/v1/things']));
 
         Http::assertSent(fn (HttpRequest $request): bool => !$request->hasHeader('Authorization'));
+    }
+
+    // ---------------------------------------------------- ai-system web scoping
+
+    public function testARequestToAnAllowedDomainSucceedsForAScopedSystem(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => ['allowed_domains' => ['api.example.com']]]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{"ok":true}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input(), null, $system);
+
+        $this->assertTrue($result['content']['ok']);
+    }
+
+    public function testARequestToADomainOutsideTheAllowListIsRefusedBeforeAnyHttpCall(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => ['allowed_domains' => ['other.example.com']]]);
+
+        Http::fake();
+
+        $result = $this->runTool($this->input(), null, $system);
+
+        $this->assertStringContainsString('not on this system', $result['error']);
+        Http::assertNothingSent();
+    }
+
+    public function testAPerSystemCredentialIsAttachedAndNeverEchoed(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => [
+            'credentials' => ['api.example.com' => ['Authorization' => 'Bearer system-scoped-secret']],
+        ]]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{"ok":true}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input(), null, $system);
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader('Authorization', 'Bearer system-scoped-secret'));
+        $this->assertStringNotContainsString('system-scoped-secret', json_encode($result) ?: '');
+    }
+
+    public function testAPerSystemCredentialDoesNotLeakToASystemWithoutItsOwnEntry(): void
+    {
+        $withCredential = new AiSystem(['web_tool_policy' => [
+            'credentials' => ['api.example.com' => ['Authorization' => 'Bearer system-scoped-secret']],
+        ]]);
+        $withoutCredential = new AiSystem(['web_tool_policy' => ['allowed_domains' => ['api.example.com']]]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $this->runTool($this->input(), null, $withCredential);
+        Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader('Authorization', 'Bearer system-scoped-secret'));
+
+        $this->runTool($this->input(), null, $withoutCredential);
+        Http::assertSent(fn (HttpRequest $request): bool => !$request->hasHeader('Authorization'));
+    }
+
+    public function testAPerSystemCredentialTakesPrecedenceOverGlobalConfig(): void
+    {
+        config(['code-talker.tools.http_request.credentials' => [
+            'api.example.com' => ['Authorization' => 'Bearer global-secret'],
+        ]]);
+
+        $system = new AiSystem(['web_tool_policy' => [
+            'credentials' => ['api.example.com' => ['Authorization' => 'Bearer system-scoped-secret']],
+        ]]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $this->runTool($this->input(), null, $system);
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader('Authorization', 'Bearer system-scoped-secret'));
+    }
+
+    public function testARedirectToADomainOutsideTheAllowListIsRefused(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => ['allowed_domains' => ['api.example.com']]]);
+
+        Http::fake([
+            'https://api.example.com/redirect' => Http::response('', 302, ['Location' => 'https://other.example.com/']),
+        ]);
+
+        $result = $this->runTool($this->input([
+            'url' => 'https://api.example.com/redirect',
+            'request_policy' => ['allowed_methods' => ['GET'], 'allowed_hosts' => ['api.example.com', 'other.example.com']],
+        ]), null, $system);
+
+        $this->assertStringContainsString('refused', $result['error']);
+    }
+
+    public function testARedirectDoesNotCarryTheOriginatingSystemsCredentialToAnAllowedNewHost(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => [
+            'allowed_domains' => ['api.example.com', 'other.example.com'],
+            'credentials' => ['api.example.com' => ['Authorization' => 'Bearer system-scoped-secret']],
+        ]]);
+
+        Http::fake([
+            'https://api.example.com/redirect' => Http::response('', 302, ['Location' => 'https://other.example.com/']),
+            'https://other.example.com/' => Http::response('{}', 200, ['Content-Type' => 'application/json']),
+        ]);
+
+        $this->runTool($this->input([
+            'url' => 'https://api.example.com/redirect',
+            'request_policy' => ['allowed_methods' => ['GET'], 'allowed_hosts' => ['api.example.com', 'other.example.com']],
+        ]), null, $system);
+
+        Http::assertSent(function (HttpRequest $request): bool {
+            return !str_contains($request->url(), 'other.example.com') || !$request->hasHeader('Authorization');
+        });
+    }
+
+    // ------------------------------------------------- model-supplied credentials
+
+    public function testACallerSuppliedCredentialIsStrippedOnAnUnrestrictedSystemEvenWhenDeclared(): void
+    {
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input([
+            'headers' => "Authorization: Bearer user-supplied-token",
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_credential_headers' => true],
+        ]));
+
+        Http::assertSent(fn (HttpRequest $request): bool => !$request->hasHeader('Authorization'));
+        $this->assertContains('Authorization', $result['stripped_headers']);
+    }
+
+    public function testACallerSuppliedCredentialIsStrippedOnAScopedSystemWithoutTheDeclaration(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => ['allowed_domains' => ['api.example.com']]]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input([
+            'headers' => "Authorization: Bearer user-supplied-token",
+        ]), null, $system);
+
+        Http::assertSent(fn (HttpRequest $request): bool => !$request->hasHeader('Authorization'));
+        $this->assertContains('Authorization', $result['stripped_headers']);
+    }
+
+    public function testACallerSuppliedCredentialIsSentOnAScopedSystemWithTheDeclaration(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => ['allowed_domains' => ['api.example.com']]]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input([
+            'headers' => "Authorization: Bearer user-supplied-token",
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_credential_headers' => true],
+        ]), null, $system);
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader('Authorization', 'Bearer user-supplied-token'));
+        $this->assertArrayNotHasKey('stripped_headers', $result);
+    }
+
+    public function testACallerSuppliedCredentialTakesPrecedenceOverAPerSystemCredentialForTheSameHeader(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => [
+            'allowed_domains' => ['api.example.com'],
+            'credentials' => ['api.example.com' => ['Authorization' => 'Bearer system-scoped-secret']],
+        ]]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $this->runTool($this->input([
+            'headers' => "Authorization: Bearer user-supplied-token",
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_credential_headers' => true],
+        ]), null, $system);
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader('Authorization', 'Bearer user-supplied-token'));
+    }
+
+    public function testConnectionManagementHeadersAreAlwaysStrippedRegardlessOfDeclaration(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => ['allowed_domains' => ['api.example.com']]]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input([
+            'headers' => "Proxy-Authorization: Basic abc\nConnection: keep-alive",
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_credential_headers' => true],
+        ]), null, $system);
+
+        Http::assertSent(fn (HttpRequest $request): bool => !$request->hasHeader('Proxy-Authorization') && !$request->hasHeader('Connection'));
+        $this->assertContains('Proxy-Authorization', $result['stripped_headers']);
+        $this->assertContains('Connection', $result['stripped_headers']);
+    }
+
+    public function testACallerSuppliedCredentialIsStrippedWithNoConversationAndNoGlobalAllowList(): void
+    {
+        // No AiSystem passed to tool() at all — the external MCP server's
+        // ToolContext, which has no conversation.
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input([
+            'headers' => "Authorization: Bearer user-supplied-token",
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_credential_headers' => true],
+        ]));
+
+        Http::assertSent(fn (HttpRequest $request): bool => !$request->hasHeader('Authorization'));
+        $this->assertContains('Authorization', $result['stripped_headers']);
+    }
+
+    public function testACallerSuppliedCredentialIsSentWithNoConversationWhenTheGlobalAllowListCoversTheHost(): void
+    {
+        // The external MCP server has no AiSystem to carry a web_tool_policy
+        // at all, so the global config is the only thing that can ever scope
+        // it — see ToolContext::webToolPolicy().
+        config(['code-talker.tools.web_fetcher.allowed_domains' => ['api.example.com']]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input([
+            'headers' => "Authorization: Bearer user-supplied-token",
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_credential_headers' => true],
+        ]));
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader('Authorization', 'Bearer user-supplied-token'));
+        $this->assertArrayNotHasKey('stripped_headers', $result);
+    }
+
+    public function testTheGlobalAllowListDoesNotNarrowARequestThatCameThroughAnUnrestrictedAiSystem(): void
+    {
+        // A conversation's AiSystem is the sole authority when one exists.
+        // The operator left this system unrestricted on purpose; the global
+        // MCP-fallback config must not silently retighten it.
+        config(['code-talker.tools.web_fetcher.allowed_domains' => ['other.example.com']]);
+
+        $system = new AiSystem(['web_tool_policy' => null]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{"ok":true}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input(), null, $system);
+
+        $this->assertTrue($result['content']['ok']);
+    }
+
+    public function testACallerSuppliedCredentialDoesNotCarryToARedirectedHostEvenWithinTheAllowList(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => [
+            'allowed_domains' => ['api.example.com', 'other.example.com'],
+        ]]);
+
+        Http::fake([
+            'https://api.example.com/redirect' => Http::response('', 302, ['Location' => 'https://other.example.com/']),
+            'https://other.example.com/' => Http::response('{}', 200, ['Content-Type' => 'application/json']),
+        ]);
+
+        $this->runTool($this->input([
+            'url' => 'https://api.example.com/redirect',
+            'headers' => "Authorization: Bearer user-supplied-token",
+            'request_policy' => [
+                'allowed_methods' => ['GET'],
+                'allowed_hosts' => ['api.example.com', 'other.example.com'],
+                'allow_credential_headers' => true,
+            ],
+        ]), null, $system);
+
+        Http::assertSent(function (HttpRequest $request): bool {
+            return !str_contains($request->url(), 'other.example.com') || !$request->hasHeader('Authorization');
+        });
     }
 
     // ------------------------------------------------------------- decoding
@@ -536,6 +805,41 @@ class HttpRequestToolTest extends TestCase
         $this->assertFalse($result['truncated']);
         $this->assertIsArray($result['content']);
         $this->assertCount(2000, $result['content']['items']);
+    }
+
+    public function testAConfiguredContentLengthCapIsRespected(): void
+    {
+        config(['code-talker.tools.web_fetcher.max_content_length' => 500]);
+
+        Http::fake(['https://api.example.com/*' => Http::response(str_repeat('a', 25000), 200, ['Content-Type' => 'text/plain'])]);
+
+        $result = $this->runTool($this->input());
+
+        $this->assertTrue($result['truncated']);
+        $this->assertSame(500, mb_strlen($result['content']));
+    }
+
+    public function testAConfiguredBodyLengthCapIsRespected(): void
+    {
+        config(['code-talker.tools.web_fetcher.max_body_length' => 100]);
+
+        Http::fake(['https://api.example.com/*' => Http::response(str_repeat('a', 25000), 200, ['Content-Type' => 'text/plain'])]);
+
+        $result = $this->runTool($this->input());
+
+        $this->assertSame(100, mb_strlen($result['content']));
+    }
+
+    public function testDecliningTruncationIgnoresAConfiguredContentLengthCap(): void
+    {
+        config(['code-talker.tools.web_fetcher.max_content_length' => 500]);
+
+        Http::fake(['https://api.example.com/*' => Http::response(str_repeat('a', 25000), 200, ['Content-Type' => 'text/plain'])]);
+
+        $result = $this->runTool($this->input(['truncate_content' => false]));
+
+        $this->assertFalse($result['truncated']);
+        $this->assertSame(25000, mb_strlen($result['content']));
     }
 
     public function testItReportsAConnectionFailure(): void

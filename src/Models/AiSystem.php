@@ -33,9 +33,14 @@ class AiSystem extends Model
         'system_prompt_mode',
         'supports_tools',
         'allowed_tools',
+        'web_tool_policy',
         'supports_json_mode',
         'enable_thinking',
         'is_local_endpoint',
+        // @deprecated Slated for removal — a host-configured pricing
+        // override is redundant with the provider-level pricing config
+        // (code-talker.providers.*.pricing) ConversationUsageService already
+        // falls back to.
         'pricing_profile',
     ];
 
@@ -46,10 +51,12 @@ class AiSystem extends Model
             'config' => 'array',
             'credentials' => 'encrypted:array',
             'model_capabilities' => 'array',
+            /** @deprecated See the `$fillable` entry above. */
             'pricing_profile' => 'array',
             'is_active' => 'boolean',
             'supports_tools' => 'boolean',
             'allowed_tools' => 'array',
+            'web_tool_policy' => 'encrypted:array',
             'supports_json_mode' => 'boolean',
             'enable_thinking' => 'boolean',
             'is_local_endpoint' => 'boolean',

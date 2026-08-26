@@ -64,6 +64,53 @@ class AiSystemManagerTest extends TestCase
         $this->assertIsArray($system->fresh()->pricing_profile);
     }
 
+    public function test_a_well_formed_web_tool_policy_is_accepted_and_decoded(): void
+    {
+        $system = $this->manager()->create($this->validAttributes([
+            'web_tool_policy' => json_encode([
+                'allowed_domains' => ['api.example.com'],
+                'credentials' => ['api.example.com' => ['Authorization' => 'Bearer secret']],
+            ]),
+        ]));
+
+        $this->assertIsArray($system->fresh()->web_tool_policy);
+        $this->assertSame(['api.example.com'], $system->fresh()->web_tool_policy['allowed_domains']);
+    }
+
+    public function test_a_web_tool_policy_with_non_string_allowed_domains_is_rejected(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        $this->manager()->create($this->validAttributes([
+            'web_tool_policy' => json_encode(['allowed_domains' => [123]]),
+        ]));
+    }
+
+    public function test_a_web_tool_policy_with_a_non_object_credentials_map_is_rejected(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        $this->manager()->create($this->validAttributes([
+            'web_tool_policy' => json_encode(['credentials' => 'not-an-object']),
+        ]));
+    }
+
+    public function test_a_web_tool_policy_with_a_non_string_header_value_is_rejected(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        $this->manager()->create($this->validAttributes([
+            'web_tool_policy' => json_encode(['credentials' => ['api.example.com' => ['Authorization' => ['nested']]]]),
+        ]));
+    }
+
+    public function test_no_web_tool_policy_leaves_the_system_unrestricted(): void
+    {
+        $system = $this->manager()->create($this->validAttributes());
+
+        $this->assertNull($system->fresh()->web_tool_policy);
+    }
+
     public function test_custom_prompt_text_creates_a_prompt_record_and_links_it(): void
     {
         $system = $this->manager()->create($this->validAttributes([

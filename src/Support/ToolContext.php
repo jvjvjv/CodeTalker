@@ -3,6 +3,7 @@
 namespace Jvjvjv\CodeTalker\Support;
 
 use Jvjvjv\CodeTalker\Models\AiConversation;
+use Jvjvjv\CodeTalker\Services\Web\WebToolPolicy;
 
 /**
  * Identity/context a tool runs under, populated differently per transport.
@@ -51,6 +52,36 @@ final class ToolContext
     public function botName(): ?string
     {
         return $this->conversation?->aiChatBot?->name;
+    }
+
+    /**
+     * The web-tool domain/credential scoping in force for this call.
+     *
+     * A conversation's AiSystem is the sole authority when one exists —
+     * including its choice to leave `web_tool_policy` unset, which means
+     * unrestricted and stays unrestricted; there is no fallback here, because
+     * falling back would silently retighten a bot the operator already chose
+     * not to scope.
+     *
+     * Without a conversation (the external MCP server — see {@see forUser()})
+     * there is no AiSystem to ask at all, so the global
+     * `code-talker.tools.web_fetcher.allowed_domains` config is consulted
+     * instead. Without this, an MCP caller could never satisfy
+     * `WebFetcher::allowsCredentialHeaders()`, regardless of what an operator
+     * configures — nothing would ever be able to scope that transport.
+     */
+    public function webToolPolicy(): WebToolPolicy
+    {
+        if ($this->conversation !== null) {
+            return WebToolPolicy::fromArray($this->conversation->aiChatBot?->aiSystem?->web_tool_policy);
+        }
+
+        /** @var array<int, mixed> $configured */
+        $configured = (array) config('code-talker.tools.web_fetcher.allowed_domains', []);
+
+        return new WebToolPolicy(
+            allowedDomains: $configured !== [] ? array_values(array_map('strval', $configured)) : null,
+        );
     }
 
     /**
