@@ -312,7 +312,7 @@ class AiSystemManager
      *
      * Provider failures propagate; the caller decides how to surface them.
      *
-     * @return array<int, array{id: string, name: string, loaded: bool, max_context_length: int|null, capabilities: array{reasoning: bool, vision: bool, tools: bool}}>
+     * @return array<int, array{id: string, name: string, loaded: bool, max_context_length: int|null, capabilities: array{reasoning: bool|null, vision: bool, tools: bool|null}}>
      *
      * @throws InvalidArgumentException if the provider needs an API key and none was given
      */
@@ -333,9 +333,12 @@ class AiSystemManager
                 'loaded' => (bool) ($model['loaded'] ?? false),
                 'max_context_length' => $model['max_context_length'] ?? null,
                 'capabilities' => [
-                    'reasoning' => (bool) data_get($model, 'capabilities.reasoning', false),
+                    // Only LM Studio's model list reports capabilities at all; leaving
+                    // `reasoning`/`tools` unset (rather than defaulting to false) for every
+                    // other provider lets callers tell "unsupported" apart from "unknown".
+                    'reasoning' => data_get($model, 'capabilities.reasoning'),
                     'vision' => (bool) data_get($model, 'capabilities.vision', false),
-                    'tools' => (bool) data_get($model, 'capabilities.tools', false),
+                    'tools' => data_get($model, 'capabilities.tools'),
                 ],
             ])
             ->sortBy('name')

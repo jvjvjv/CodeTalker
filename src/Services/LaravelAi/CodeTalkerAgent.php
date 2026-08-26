@@ -48,7 +48,20 @@ class CodeTalkerAgent implements Agent, HasProviderOptions, HasTools, RemembersC
         protected int $maxSteps = 6,
         protected int $timeout = 60,
         protected array $providerOptions = [],
+        protected bool $showThinking = true,
     ) {
+    }
+
+    /**
+     * Whether reasoning/"thinking" output should be surfaced to the caller.
+     *
+     * Deliberately not part of providerOptions() — that array is merged
+     * straight into the outgoing HTTP request body, and this is read
+     * out-of-band by ReasoningOpenAiCompatibleGateway via the agent instance.
+     */
+    public function showThinking(): bool
+    {
+        return $this->showThinking;
     }
 
     public function instructions(): Stringable|string

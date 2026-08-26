@@ -20,14 +20,14 @@ class ReasoningOpenAiCompatibleGatewayTest extends TestCase
      *
      * @return array<int, object>
      */
-    private function streamEvents(string $sse): array
+    private function streamEvents(string $sse, bool $showThinking = true): array
     {
         $gateway = new class($this->app->make(Dispatcher::class)) extends ReasoningOpenAiCompatibleGateway
         {
-            public function run(ReasoningOpenAiCompatibleProvider $provider, string $sse): array
+            public function run(ReasoningOpenAiCompatibleProvider $provider, string $sse, bool $showThinking): array
             {
                 return iterator_to_array(
-                    $this->processTextStream('inv-1', $provider, 'qwen', Utils::streamFor($sse)),
+                    $this->processTextStream('inv-1', $provider, 'qwen', Utils::streamFor($sse), $showThinking),
                     false,
                 );
             }
@@ -38,7 +38,26 @@ class ReasoningOpenAiCompatibleGatewayTest extends TestCase
             $this->app->make(Dispatcher::class),
         );
 
-        return $gateway->run($provider, $sse);
+        return $gateway->run($provider, $sse, $showThinking);
+    }
+
+    public function test_reasoning_is_suppressed_when_show_thinking_is_false(): void
+    {
+        $sse = 'data: {"model":"qwen","choices":[{"delta":{"reasoning_content":"thinking..."}}]}' . "\n\n"
+            . 'data: {"choices":[{"delta":{"content":"Hello"}}]}' . "\n\n"
+            . 'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}' . "\n\n"
+            . 'data: [DONE]' . "\n\n";
+
+        $events = $this->streamEvents($sse, showThinking: false);
+
+        $reasoning = array_values(array_filter($events, fn ($e) => $e instanceof ReasoningDelta));
+        $text = array_values(array_filter($events, fn ($e) => $e instanceof TextDelta));
+
+        $this->assertCount(0, $reasoning);
+
+        // Suppressing reasoning doesn't touch the text path.
+        $this->assertCount(1, $text);
+        $this->assertSame('Hello', $text[0]->delta);
     }
 
     public function test_reasoning_content_is_emitted_as_a_reasoning_delta(): void
