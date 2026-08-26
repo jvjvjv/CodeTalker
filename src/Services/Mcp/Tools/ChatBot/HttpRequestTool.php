@@ -20,7 +20,10 @@ use Laravel\Mcp\Server\Tool;
     . 'Use this for APIs and non-HTML resources; use fetch-web-page for reading an ordinary web page. '
     . 'You MUST supply request_policy declaring the methods you intend to use, and whether you intend '
     . 'to reach private or loopback hosts. A request with no declared policy is refused before it is sent. '
-    . 'Do not send credentials: authentication headers are stripped, and the host supplies any that are needed.'
+    . 'Authentication headers (Authorization, Cookie) are stripped by default; the host usually supplies '
+    . 'any that are needed. If you have been given a credential to use directly (e.g. one the user provided '
+    . 'in conversation), declare request_policy.allow_credential_headers to send it yourself — this only '
+    . 'works when this system is restricted to specific domains, and is refused otherwise.'
 )]
 class HttpRequestTool extends Tool
 {
@@ -62,6 +65,13 @@ class HttpRequestTool extends Tool
                 'allowed_hosts' => $schema->array()
                     ->items($schema->string())
                     ->description('Optional. When given, the request is refused unless the URL host is in this list.'),
+                'allow_credential_headers' => $schema->boolean()
+                    ->description(
+                        'Set true only when you are deliberately sending an Authorization or Cookie header you were '
+                        . 'given (e.g. by the user, in conversation). Declaring this is not sufficient by itself — it '
+                        . 'is honored only when this AiSystem has been restricted to specific domains by its operator. '
+                        . 'On an unrestricted system, credential headers are stripped regardless of this declaration.'
+                    ),
             ])
                 ->description(
                     'Required. Your declared intent for this request. The request is refused when this is missing, '
@@ -72,13 +82,14 @@ class HttpRequestTool extends Tool
                 ->description('Optional request body, sent as-is. Set a Content-Type header to describe it.'),
             'headers' => $schema->object()
                 ->description(
-                    'Optional request headers. Authentication headers (Authorization, Cookie) and connection '
-                    . 'headers are stripped and reported back; the host supplies credentials from its own config.'
+                    'Optional request headers. Connection-management headers (Host, Connection, Proxy-Authorization, '
+                    . '...) are always stripped. Authorization and Cookie are stripped unless '
+                    . 'request_policy.allow_credential_headers is set and this system permits it — see that field.'
                 ),
             'keep_html' => $schema->boolean()
                 ->description('Indicate whether HTML should be kept or stripped. Only works for HTML responses.'),
             'truncate_content' => $schema->boolean()
-                ->description('Indicate whether content should be truncated at ' . WebFetcher::MAX_CONTENT_LENGTH . ' bytes.'),
+                ->description('Indicate whether content should be truncated at ' . WebFetcher::maxContentLength() . ' bytes.'),
             'target_selector' => $schema->string()
                 ->description('Selector to target; everything outside of that target_selector will be trimmed. Only works for HTML responses.'),
         ];
@@ -141,7 +152,12 @@ class HttpRequestTool extends Tool
      */
     protected function fetcher(): WebFetcher
     {
-        return new WebFetcher(new HostGate(self::PRIVATE_HOST_MESSAGE), $this->context->botName(), 'http-request');
+        return new WebFetcher(
+            new HostGate(self::PRIVATE_HOST_MESSAGE),
+            $this->context->botName(),
+            'http-request',
+            $this->context->webToolPolicy(),
+        );
     }
 
     /**

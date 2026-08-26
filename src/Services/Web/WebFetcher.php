@@ -25,12 +25,6 @@ use Symfony\Component\DomCrawler\Crawler;
  */
 class WebFetcher
 {
-    /** Bytes read off the wire before the body is cut. */
-    public const MAX_BODY_LENGTH = 150000;
-
-    /** Characters of decoded content returned unless truncation is declined. */
-    public const MAX_CONTENT_LENGTH = 20000;
-
     private const CONNECT_TIMEOUT = 10;
 
     private const TIMEOUT = 20;
@@ -39,16 +33,26 @@ class WebFetcher
     private const MAX_REDIRECTS = 5;
 
     /**
-     * Request headers a caller may never set.
+     * Credential headers a caller may set only when {@see allowsCredentialHeaders()}
+     * permits it for the request being made — never unconditionally, since a
+     * caller acting on injected instructions could otherwise send a real
+     * credential to a host the operator never approved.
+     */
+    private const CREDENTIAL_HEADERS = [
+        'authorization',
+        'cookie',
+    ];
+
+    /**
+     * Request headers a caller may never set, regardless of policy.
      *
-     * Authentication headers are excluded because credentials come from host
-     * configuration, never from the model. Hop-by-hop headers are excluded
-     * because they describe a connection the caller does not own.
+     * These describe a connection or a hop the caller does not own — a proxy
+     * credential, the Host header, connection-management headers — not the
+     * destination's own authentication, so there is no legitimate case for a
+     * caller to control them.
      */
     private const FORBIDDEN_REQUEST_HEADERS = [
-        'authorization',
         'proxy-authorization',
-        'cookie',
         'host',
         'connection',
         'keep-alive',
@@ -69,7 +73,23 @@ class WebFetcher
         private readonly HostGate $gate,
         private readonly ?string $botName = null,
         private readonly string $logLabel = 'fetch-web-page',
+        private readonly WebToolPolicy $policy = new WebToolPolicy(),
     ) {}
+
+    /**
+     * Bytes read off the wire before the body is cut. Read with an inline
+     * default per the same mergeConfigFrom caveat as {@see credentialsFor()}.
+     */
+    public static function maxBodyLength(): int
+    {
+        return (int) config('code-talker.tools.web_fetcher.max_body_length', 150000);
+    }
+
+    /** Characters of decoded content returned unless truncation is declined. */
+    public static function maxContentLength(): int
+    {
+        return (int) config('code-talker.tools.web_fetcher.max_content_length', 20000);
+    }
 
     /**
      * Fetch a readable web page — the `fetch-web-page` behavior.
@@ -134,9 +154,22 @@ class WebFetcher
         string $targetSelector = '',
         bool $truncate = true,
     ): FetchedResponse {
-        [$safeHeaders, $strippedHeaders] = $this->filterRequestHeaders($headers);
+        [$safeHeaders, $credentialHeaders, $strippedHeaders] = $this->filterRequestHeaders($headers);
 
-        $sent = $this->sendFollowingRedirects(strtoupper($method), $url, $body, $safeHeaders, $policy);
+        if (! $this->allowsCredentialHeaders($policy)) {
+            array_push($strippedHeaders, ...array_keys($credentialHeaders));
+            $credentialHeaders = [];
+        }
+
+        $sent = $this->sendFollowingRedirects(
+            strtoupper($method),
+            $url,
+            $body,
+            $safeHeaders,
+            $policy,
+            $credentialHeaders,
+            strtolower((string) parse_url($url, PHP_URL_HOST)),
+        );
 
         if ($sent instanceof FetchedResponse) {
             return $sent->withStrippedHeaders($strippedHeaders);
@@ -153,10 +186,16 @@ class WebFetcher
      * Issue a request, re-validating and re-issuing on each redirect.
      *
      * Credentials are re-derived per hop from the hop's own host, so a redirect
-     * to a different host cannot carry the first host's token with it.
+     * to a different host cannot carry the first host's token with it. This
+     * applies equally to `$credentialHeaders` — the caller's own Authorization/
+     * Cookie, permitted by {@see allowsCredentialHeaders()} — which is sent
+     * only while the current hop's host still matches `$originalHost`: the
+     * model attached that header to the host it named, not to wherever a
+     * redirect happens to end up, even one within the same AiSystem's
+     * allow-list.
      *
      * @param array<string, string> $safeHeaders
-     * @param (callable(string, string): ?string)|null $validateHop
+     * @param array<string, string> $credentialHeaders
      * @return array{0: int, 1: string, 2: string, 3: ?string, 4: string}|FetchedResponse
      */
     private function sendFollowingRedirects(
@@ -165,13 +204,15 @@ class WebFetcher
         ?string $body,
         array $safeHeaders,
         RequestPolicy $policy,
+        array $credentialHeaders = [],
+        string $originalHost = '',
     ): array|FetchedResponse {
         $currentUrl = $url;
         $currentMethod = $method;
         $currentBody = $body;
 
         for ($hop = 0; $hop <= self::MAX_REDIRECTS; $hop++) {
-            $refusal = $this->gate->refuse($currentUrl, $currentMethod, $policy);
+            $refusal = $this->gate->refuse($currentUrl, $currentMethod, $policy, $this->policy->allowedDomains);
 
             if ($refusal !== null) {
                 return FetchedResponse::failure(
@@ -184,11 +225,19 @@ class WebFetcher
                 );
             }
 
+            $currentHost = strtolower((string) parse_url($currentUrl, PHP_URL_HOST));
+            $headersForHop = $currentHost === $originalHost
+                ? $this->mergeHeaders($safeHeaders, $credentialHeaders)
+                : $safeHeaders;
+
             $sent = $this->send(
                 $currentMethod,
                 $currentUrl,
                 $currentBody,
-                array_merge($safeHeaders, $this->credentialsFor($currentUrl)),
+                // $headersForHop wins on a name collision: a credential header
+                // the caller was explicitly permitted to set is more specific
+                // than a host-configured default for the same header name.
+                $this->mergeHeaders($this->credentialsFor($currentUrl), $headersForHop),
             );
 
             if ($sent instanceof FetchedResponse) {
@@ -313,7 +362,7 @@ class WebFetcher
         return [
             $response->status(),
             strtolower((string) ($response->header('Content-Type') ?? '')),
-            mb_substr($response->body(), 0, self::MAX_BODY_LENGTH),
+            mb_substr($response->body(), 0, self::maxBodyLength()),
             ($location === null || $location === '') ? null : $location,
         ];
     }
@@ -410,18 +459,32 @@ class WebFetcher
     /**
      * Strip headers a caller may not set, and headers the package owns.
      *
+     * Credential headers are pulled into their own bucket rather than kept or
+     * stripped here — whether they survive at all (policy) and which hops
+     * they travel with (same-host-only) are both decided by the caller, in
+     * {@see request()} and {@see sendFollowingRedirects()}.
+     *
      * @param array<string, mixed> $headers
-     * @return array{0: array<string, string>, 1: array<int, string>} Kept headers, refused header names
+     * @return array{0: array<string, string>, 1: array<string, string>, 2: array<int, string>} Kept headers, credential headers, stripped header names
      */
     private function filterRequestHeaders(array $headers): array
     {
         $kept = [];
+        $credential = [];
         $stripped = [];
 
         foreach ($headers as $name => $value) {
             $normalized = strtolower(trim((string) $name));
 
             if ($normalized === '') {
+                continue;
+            }
+
+            $value = is_array($value) ? implode(', ', array_map('strval', $value)) : (string) $value;
+
+            if (in_array($normalized, self::CREDENTIAL_HEADERS, true)) {
+                $credential[(string) $name] = $value;
+
                 continue;
             }
 
@@ -432,14 +495,36 @@ class WebFetcher
                 continue;
             }
 
-            $kept[(string) $name] = is_array($value) ? implode(', ', array_map('strval', $value)) : (string) $value;
+            $kept[(string) $name] = $value;
         }
 
-        return [$kept, $stripped];
+        return [$kept, $credential, $stripped];
     }
 
     /**
-     * Credential headers configured by the host for this URL's exact host.
+     * Whether this request may carry a caller-supplied Authorization/Cookie
+     * header through to the destination.
+     *
+     * Both conditions are required. `$policy->allowCredentialHeaders` is the
+     * caller's own declaration and is not trusted alone — a caller acting on
+     * injected instructions could declare it freely. `$this->policy->allowedDomains`
+     * is the AiSystem operator's own boundary, set outside the conversation
+     * entirely, and every hop of this request (including redirects) is
+     * already refused by HostGate unless it stays within that list — so once
+     * both hold, there is no host this request can reach that the operator
+     * did not approve.
+     */
+    private function allowsCredentialHeaders(RequestPolicy $policy): bool
+    {
+        return $policy->allowCredentialHeaders
+            && $this->policy->allowedDomains !== null
+            && $this->policy->allowedDomains !== [];
+    }
+
+    /**
+     * Credential headers for this URL's exact host: the AiSystem's own
+     * `web_tool_policy` takes precedence, falling back to the global
+     * host-keyed config map.
      *
      * Read with an inline default: Laravel skips mergeConfigFrom entirely when
      * the host has cached config, so a host that published code-talker.php
@@ -453,6 +538,12 @@ class WebFetcher
 
         if ($host === '') {
             return [];
+        }
+
+        $scoped = $this->policy->credentialsFor($host);
+
+        if ($scoped !== []) {
+            return $scoped;
         }
 
         /** @var array<string, array<string, string>> $configured */
@@ -576,7 +667,7 @@ class WebFetcher
     {
         $encoded = (string) json_encode($decoded);
 
-        if (!$truncate || mb_strlen($encoded) <= self::MAX_CONTENT_LENGTH) {
+        if (!$truncate || mb_strlen($encoded) <= self::maxContentLength()) {
             return FetchedResponse::decoded($url, $status, $contentType, $decoded);
         }
 
@@ -584,7 +675,7 @@ class WebFetcher
             url: $url,
             status: $status,
             contentType: $contentType,
-            content: mb_substr($encoded, 0, self::MAX_CONTENT_LENGTH),
+            content: mb_substr($encoded, 0, self::maxContentLength()),
             truncated: true,
             notes: [
                 'The decoded structure exceeded the content limit, so it is returned as truncated text rather than as an incomplete structure. Request a narrower resource, or set truncate_content to false.',
@@ -601,7 +692,7 @@ class WebFetcher
             status: $status,
             contentType: $contentType,
             content: $truncate ? $this->truncateContent($content) : $content,
-            truncated: $truncate && mb_strlen($content) > self::MAX_CONTENT_LENGTH,
+            truncated: $truncate && mb_strlen($content) > self::maxContentLength(),
         );
     }
 
@@ -650,7 +741,7 @@ class WebFetcher
             status: $status,
             contentType: $contentType,
             content: $truncate ? $this->truncateContent($content) : $content,
-            truncated: $truncate && mb_strlen($content) > self::MAX_CONTENT_LENGTH,
+            truncated: $truncate && mb_strlen($content) > self::maxContentLength(),
             title: $title !== '' ? $title : null,
         );
     }
@@ -708,7 +799,7 @@ class WebFetcher
 
     private function truncateContent(string $content): string
     {
-        return mb_substr($content, 0, self::MAX_CONTENT_LENGTH);
+        return mb_substr($content, 0, self::maxContentLength());
     }
 
     private function extractTargetHtml(string $html, string $url, string $selector): ?string

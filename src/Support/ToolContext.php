@@ -3,6 +3,7 @@
 namespace Jvjvjv\CodeTalker\Support;
 
 use Jvjvjv\CodeTalker\Models\AiConversation;
+use Jvjvjv\CodeTalker\Services\Web\WebToolPolicy;
 
 /**
  * Identity/context a tool runs under, populated differently per transport.
@@ -51,6 +52,16 @@ final class ToolContext
     public function botName(): ?string
     {
         return $this->conversation?->aiChatBot?->name;
+    }
+
+    /**
+     * The web-tool domain/credential scoping for this conversation's AiSystem.
+     * Unrestricted when there is no conversation, no chat bot, no system, or
+     * the system has no policy configured — matching pre-scoping behavior.
+     */
+    public function webToolPolicy(): WebToolPolicy
+    {
+        return WebToolPolicy::fromArray($this->conversation?->aiChatBot?->aiSystem?->web_tool_policy);
     }
 
     /**

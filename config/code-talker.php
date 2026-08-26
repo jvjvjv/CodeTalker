@@ -147,6 +147,15 @@ return [
             ],
         ],
 
+        // Caps shared by fetch-web-page and http-request. max_body_length is
+        // the raw bytes read off the wire before the body is cut, applied
+        // unconditionally. max_content_length is the characters of decoded
+        // content returned, applied unless a tool call declines truncation.
+        'web_fetcher' => [
+            'max_body_length' => (int) env('CODE_TALKER_MAX_BODY_LENGTH', 150000),
+            'max_content_length' => (int) env('CODE_TALKER_MAX_CONTENT_LENGTH', 20000),
+        ],
+
     ],
 
     /*

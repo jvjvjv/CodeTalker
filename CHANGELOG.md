@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.12.0] — 2026-08-25
+
+### New Features
+- `fetch-web-page` and `http-request`'s body/content length caps (`WebFetcher::maxBodyLength()` / `maxContentLength()`) are now configurable via `CODE_TALKER_MAX_BODY_LENGTH` / `CODE_TALKER_MAX_CONTENT_LENGTH`, replacing the previous hardcoded `MAX_BODY_LENGTH` / `MAX_CONTENT_LENGTH` constants.
+- Added per-`AiSystem` web-tool scoping: `web_tool_policy` (`allowed_domains`, `credentials`) restricts `fetch-web-page`/`http-request` to specific domains for a given system, enforced by `HostGate` ahead of the model's own `request_policy`. A system with no `web_tool_policy` is unrestricted, matching pre-existing behavior.
+- Added `request_policy.allow_credential_headers` to `http-request`, letting a model-supplied `Authorization`/`Cookie` header through — for a credential the model was handed directly in conversation, with no way for an operator to pre-configure it. Honored only when the `AiSystem`'s `web_tool_policy.allowed_domains` is non-empty; the model's own declaration is never sufficient by itself. A model-supplied credential wins over a configured one for the same header name, and is not carried to a different host on redirect even within the allow-list.
+
+### Bug Fixes
+- `AiSystem.pricing_profile` is `@deprecated` and slated for removal — redundant with `code-talker.providers.*.pricing`, which `ConversationUsageService` already falls back to.
+
 ## [0.11.0] — 2026-08-25
 
 This release turns Code Talker into a pure library. The package no longer registers routes, ships controllers, or renders pages — a chat turn is a method call, and management is a service layer the host drives from its own screens. Conversation history is now read through `laravel/ai`'s `ConversationStore`, which is what unblocks attachment replay. Two new chat-bot tools round it out: general HTTP requests, and the current date and time.

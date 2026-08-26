@@ -153,6 +153,9 @@ class ConversationUsageService
             ];
         }
 
+        // $system->pricing_profile is @deprecated and slated for removal —
+        // merged in here only so an existing per-system override still wins
+        // until then. New pricing should go in code-talker.providers.*.pricing.
         $pricingConfig = $this->effectivePricingConfig(
             $system->provider,
             (array) ($system->pricing_profile ?? []),

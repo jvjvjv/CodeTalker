@@ -145,6 +145,7 @@ An `AiSystem` record represents a fully configured provider endpoint. Create one
 | `context_length`   | Context window for local models (LM Studio)                                       |
 | `enable_thinking`  | Enable extended thinking / reasoning output (Anthropic)                           |
 | `allowed_tools`    | Array of tool names the model may invoke                                          |
+| `web_tool_policy`  | Domain allow-list and credentials for `fetch-web-page`/`http-request` — see below  |
 | `system_prompt_id` | Optional FK to an `AiSystemPrompt` record                                         |
 | `is_active`        | Inactive systems are rejected by the factory                                      |
 
@@ -534,6 +535,13 @@ string; HTML and other `text/*` types come back as text; anything else (images, 
 A response too large to return whole is truncated and flagged, and an oversized
 structure is downgraded to truncated text rather than returned as broken JSON.
 
+Both tools share the same two caps, configurable via `.env`:
+
+| Env var | Default | Applies to |
+| --- | --- | --- |
+| `CODE_TALKER_MAX_BODY_LENGTH` | `150000` bytes | Raw response body, cut immediately after fetch regardless of `truncate_content`. |
+| `CODE_TALKER_MAX_CONTENT_LENGTH` | `20000` characters | Decoded/processed content, applied unless a call declines truncation via `truncate_content: false`. |
+
 **The model must declare a request policy, and the tool fails closed without one.**
 
 ```jsonc
@@ -564,10 +572,11 @@ rather than resolving the host a second time.
 > for any bot that takes untrusted input**, and restrict outbound network access from
 > the PHP process rather than relying on the tool to police itself.
 
-**The model never supplies credentials.** `Authorization`, `Proxy-Authorization`,
-`Cookie`, `Host`, and the hop-by-hop headers are stripped from model-supplied headers
-and reported back in the response, so the model learns why its auth attempt did
-nothing. The package attaches credentials from config instead, matched on exact host:
+**The model does not supply credentials by default.** `Authorization`, `Cookie`,
+`Proxy-Authorization`, `Host`, and the hop-by-hop headers are stripped from
+model-supplied headers and reported back in the response, so the model learns why its
+auth attempt did nothing. The package attaches credentials from config instead,
+matched on exact host:
 
 ```php
 // config/code-talker.php
@@ -583,6 +592,54 @@ nothing. The package attaches credentials from config instead, matched on exact 
 Credentials are applied after filtering, so a configured credential can set a header
 the model is forbidden to set. The value never appears in the tool's inputs or its
 response.
+
+**Per-`AiSystem` scoping.** The config above is global — every system with these tools
+in `allowed_tools` shares it. To restrict a specific system to only its own domain(s),
+set `web_tool_policy` on the `AiSystem` record (via `AiSystemManager`, which validates
+its shape):
+
+```php
+$aiSystemManager->update($system, [
+    // ...
+    'web_tool_policy' => json_encode([
+        'allowed_domains' => ['api.example.com'],
+        'credentials' => [
+            'api.example.com' => ['Authorization' => 'Bearer '.env('EXAMPLE_API_TOKEN')],
+        ],
+    ]),
+]);
+```
+
+`allowed_domains` is enforced server-side by `HostGate` before any DNS resolution or
+network call — a request to a host outside the list is refused even if the model's own
+`request_policy` would have allowed it, and the check re-runs on every redirect hop.
+`credentials` follows the same host-matching and never-echoed rules as the global
+config, and takes precedence over it for a matching host. **A system with no
+`web_tool_policy` is unrestricted** — this is opt-in scoping, not a default
+tightening, so every system created before this feature keeps working unchanged.
+
+**Letting the model supply its own credential (`http-request` only).** Sometimes the
+model is handed a credential it must use directly — a token the user pasted into the
+conversation, for instance — rather than one an operator can pre-configure. Declaring
+`request_policy.allow_credential_headers: true` lets a model-supplied `Authorization`
+or `Cookie` header through, but **only when this `AiSystem`'s `web_tool_policy.allowed_domains`
+is non-empty.** The declaration alone is never sufficient: it is the model's own
+input, and a model acting on injected instructions (from a scraped page, a malicious
+chat message) could set it freely. `allowed_domains` is the boundary that actually
+matters, because it is set by the operator outside the conversation entirely, and
+`HostGate` already refuses any hop — including redirects — that falls outside it. Once
+both hold, there is no host this request can reach that the operator did not approve.
+
+A model-supplied credential header:
+- wins over a `web_tool_policy`/global-config credential for the same header name;
+- is sent only to the exact host the request named — a redirect to a *different* host,
+  even one still within `allowed_domains`, does not carry it, the same isolation
+  per-host `credentials` already gets;
+- is not stripped or reported in `stripped_headers` when it was actually sent.
+
+On an unrestricted system (no `web_tool_policy.allowed_domains`), `allow_credential_headers`
+has no effect — `Authorization`/`Cookie` are stripped exactly as before. `fetch-web-page`
+has no `headers` input at all, so this only applies to `http-request`.
 
 ### Injecting extra dependencies into tools
 

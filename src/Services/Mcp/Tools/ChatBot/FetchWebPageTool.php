@@ -44,7 +44,7 @@ class FetchWebPageTool extends Tool
             'keep_html' => $schema->boolean()
                 ->description('Indicate whether HTML should be kept or stripped. Only works for HTML responses.'),
             'truncate_content' => $schema->boolean()
-                ->description('Indicate whether content should be truncated at ' . WebFetcher::MAX_CONTENT_LENGTH . ' bytes.'),
+                ->description('Indicate whether content should be truncated at ' . WebFetcher::maxContentLength() . ' bytes.'),
             'target_selector' => $schema->string()
                 ->description('Selector to target; everything outside of that target_selector will be trimmed. Only works for HTML responses.'),
             'request_policy' => $schema->object([
@@ -98,6 +98,11 @@ class FetchWebPageTool extends Tool
      */
     protected function fetcher(): WebFetcher
     {
-        return new WebFetcher(new HostGate(self::PRIVATE_HOST_MESSAGE), $this->context->botName(), 'fetch-web-page');
+        return new WebFetcher(
+            new HostGate(self::PRIVATE_HOST_MESSAGE),
+            $this->context->botName(),
+            'fetch-web-page',
+            $this->context->webToolPolicy(),
+        );
     }
 }
