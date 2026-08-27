@@ -17,6 +17,7 @@ itself rather than a human triggering it.
 - `AiOperator::prompt_template` supports `{{dotted.path}}` placeholders resolved against the `$context` array passed at dispatch time. An unresolved placeholder fails the run before any provider call is made.
 - An operator run is bounded — one prompt through the same agentic tool loop a chat turn uses, then done — and is recorded as an `AiConversation` (`feature` = `operator:{slug}`), so it gets request/response logging, raw exchange capture, and cost tracking with no operator-specific logging path.
 - Added `Services/Management/AiOperatorManager`, mirroring the package's other management services (create/update/delete/list, static `rules()`).
+- Added `AiSystem.duplicated_at`, set to the current time whenever `AiSystemManager::duplicate()` creates a copy, so a duplicated system is distinguishable from an originally-created one.
 
 ## [0.13.0] — 2026-08-27
 
