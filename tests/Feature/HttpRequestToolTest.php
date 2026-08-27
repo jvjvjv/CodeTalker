@@ -5,7 +5,7 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\Mcp\ToolResultConverter;
@@ -31,13 +31,13 @@ class HttpRequestToolTest extends TestCase
 
         if ($botName !== null || $aiSystem !== null) {
             $conversation = new AiConversation(['context' => []]);
-            $chatBot = new AiChatBot(['name' => $botName]);
+            $persona = new AiPersona(['name' => $botName]);
 
             if ($aiSystem !== null) {
-                $chatBot->setRelation('aiSystem', $aiSystem);
+                $persona->setRelation('aiSystem', $aiSystem);
             }
 
-            $conversation->setRelation('aiChatBot', $chatBot);
+            $conversation->setRelation('aiPersona', $persona);
             $context = ToolContext::forConversation($conversation);
         }
 

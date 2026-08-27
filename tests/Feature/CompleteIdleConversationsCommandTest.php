@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
 use Jvjvjv\CodeTalker\Jobs\ProcessAiMemoryJob;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 use Jvjvjv\CodeTalker\Models\AiSystem;
@@ -42,7 +42,7 @@ class CompleteIdleConversationsCommandTest extends TestCase
         }
     }
 
-    private function makeBot(): AiChatBot
+    private function makePersona(): AiPersona
     {
         $system = AiSystem::create([
             'name' => 'Test System',
@@ -53,21 +53,21 @@ class CompleteIdleConversationsCommandTest extends TestCase
             'is_active' => true,
         ]);
 
-        return AiChatBot::create([
+        return AiPersona::create([
             'ai_system_id' => $system->id,
             'name' => 'Test Bot',
             'slug' => 'test-bot',
-            'prompt_template' => 'You are {{bot_name}}.',
+            'prompt_template' => 'You are {{persona_name}}.',
             'is_active' => true,
         ]);
     }
 
-    private function makeConversation(AiChatBot $bot, array $attributes = []): AiConversation
+    private function makeConversation(AiPersona $persona, array $attributes = []): AiConversation
     {
         return AiConversation::create(array_merge([
-            'ai_system_id' => $bot->ai_system_id,
-            'ai_chat_bot_id' => $bot->id,
-            'feature' => 'chat-bot:test-bot',
+            'ai_system_id' => $persona->ai_system_id,
+            'ai_persona_id' => $persona->id,
+            'feature' => 'persona:test-bot',
             'status' => AiConversationStatus::Active,
         ], $attributes));
     }
@@ -87,8 +87,8 @@ class CompleteIdleConversationsCommandTest extends TestCase
     {
         Queue::fake();
 
-        $bot = $this->makeBot();
-        $conversation = $this->makeConversation($bot);
+        $persona = $this->makePersona();
+        $conversation = $this->makeConversation($persona);
         $this->addMessage($conversation, 'user', now()->subMinutes(90));
         $this->addMessage($conversation, 'assistant', now()->subMinutes(89));
 
@@ -107,8 +107,8 @@ class CompleteIdleConversationsCommandTest extends TestCase
     {
         Queue::fake();
 
-        $bot = $this->makeBot();
-        $conversation = $this->makeConversation($bot);
+        $persona = $this->makePersona();
+        $conversation = $this->makeConversation($persona);
         $this->addMessage($conversation, 'user', now()->subMinutes(90));
         $this->addMessage($conversation, 'assistant', now()->subMinutes(2));
 
@@ -127,8 +127,8 @@ class CompleteIdleConversationsCommandTest extends TestCase
     {
         Queue::fake();
 
-        $bot = $this->makeBot();
-        $conversation = $this->makeConversation($bot, ['created_at' => now()->subDay()]);
+        $persona = $this->makePersona();
+        $conversation = $this->makeConversation($persona, ['created_at' => now()->subDay()]);
 
         $this->artisan('ai:complete-idle-conversations', ['--minutes' => 30])
             ->assertSuccessful();
@@ -145,8 +145,8 @@ class CompleteIdleConversationsCommandTest extends TestCase
     {
         Queue::fake();
 
-        $bot = $this->makeBot();
-        $conversation = $this->makeConversation($bot);
+        $persona = $this->makePersona();
+        $conversation = $this->makeConversation($persona);
         $this->addMessage($conversation, 'user', now()->subMinutes(90));
 
         $this->artisan('ai:complete-idle-conversations', ['--minutes' => 30, '--dry-run' => true])

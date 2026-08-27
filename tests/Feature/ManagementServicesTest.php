@@ -5,13 +5,13 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 use Jvjvjv\CodeTalker\Models\AiFeatureMemory;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiSystemPrompt;
-use Jvjvjv\CodeTalker\Services\Management\AiChatBotManager;
+use Jvjvjv\CodeTalker\Services\Management\AiPersonaManager;
 use Jvjvjv\CodeTalker\Services\Management\AiConversationManager;
 use Jvjvjv\CodeTalker\Services\Management\AiMemoryManager;
 use Jvjvjv\CodeTalker\Services\Management\AiSystemPromptManager;
@@ -61,13 +61,13 @@ class ManagementServicesTest extends TestCase
         ], $overrides));
     }
 
-    private function makeBot(AiSystem $system, array $overrides = []): AiChatBot
+    private function makePersona(AiSystem $system, array $overrides = []): AiPersona
     {
-        return AiChatBot::create(array_merge([
+        return AiPersona::create(array_merge([
             'ai_system_id' => $system->id,
             'name' => 'Test Bot',
             'slug' => 'test-bot',
-            'prompt_template' => 'You are {{bot_name}}.',
+            'prompt_template' => 'You are {{persona_name}}.',
             'is_active' => true,
         ], $overrides));
     }
@@ -108,20 +108,20 @@ class ManagementServicesTest extends TestCase
     public function test_bot_listing_aggregates_lifetime_usage(): void
     {
         $system = $this->makeSystem();
-        $bot = $this->makeBot($system);
+        $persona = $this->makePersona($system);
 
         foreach ([[100, 20, '0.50'], [50, 10, '0.25']] as [$in, $out, $cost]) {
             AiConversation::create([
                 'ai_system_id' => $system->id,
-                'ai_chat_bot_id' => $bot->id,
-                'feature' => 'chat-bot:test-bot',
+                'ai_persona_id' => $persona->id,
+                'feature' => 'persona:test-bot',
                 'usage_input_tokens' => $in,
                 'usage_output_tokens' => $out,
                 'usage_cost_usd' => $cost,
             ]);
         }
 
-        $listed = $this->app->make(AiChatBotManager::class)->listWithUsage();
+        $listed = $this->app->make(AiPersonaManager::class)->listWithUsage();
 
         $this->assertCount(1, $listed);
         $this->assertSame(2, $listed[0]['conversations_count']);
@@ -136,9 +136,9 @@ class ManagementServicesTest extends TestCase
     public function test_usage_is_null_when_no_conversation_has_a_recorded_cost(): void
     {
         $system = $this->makeSystem();
-        $this->makeBot($system);
+        $this->makePersona($system);
 
-        $listed = $this->app->make(AiChatBotManager::class)->listWithUsage();
+        $listed = $this->app->make(AiPersonaManager::class)->listWithUsage();
 
         $this->assertNull($listed[0]['usage']);
     }
@@ -148,10 +148,10 @@ class ManagementServicesTest extends TestCase
         $first = $this->makeSystem();
         $second = $this->makeSystem(['name' => 'Second']);
 
-        $this->makeBot($first, ['slug' => 'first-bot']);
-        $this->makeBot($second, ['slug' => 'second-bot', 'name' => 'Second Bot']);
+        $this->makePersona($first, ['slug' => 'first-bot']);
+        $this->makePersona($second, ['slug' => 'second-bot', 'name' => 'Second Bot']);
 
-        $listed = $this->app->make(AiChatBotManager::class)->listWithUsage($second->id);
+        $listed = $this->app->make(AiPersonaManager::class)->listWithUsage($second->id);
 
         $this->assertCount(1, $listed);
         $this->assertSame('second-bot', $listed[0]['slug']);
@@ -160,38 +160,38 @@ class ManagementServicesTest extends TestCase
     public function test_a_reserved_slug_is_rejected_only_from_the_root_path(): void
     {
         $system = $this->makeSystem();
-        $manager = $this->app->make(AiChatBotManager::class);
+        $manager = $this->app->make(AiPersonaManager::class);
 
         $attributes = [
             'name' => 'Admin Bot',
             'slug' => 'admin',
             'ai_system_id' => $system->id,
-            'prompt_template' => 'You are {{bot_name}}.',
+            'prompt_template' => 'You are {{persona_name}}.',
         ];
 
         // Under /chat/ there is no conflict with a host route.
-        $bot = $manager->create($attributes + ['access_path' => AiChatBot::ACCESS_PATH_CHAT]);
-        $this->assertSame('admin', $bot->slug);
+        $persona = $manager->create($attributes + ['access_path' => AiPersona::ACCESS_PATH_CHAT]);
+        $this->assertSame('admin', $persona->slug);
 
         $this->expectException(ValidationException::class);
 
         $manager->create(array_merge($attributes, [
             'slug' => 'login',
-            'access_path' => AiChatBot::ACCESS_PATH_ROOT,
+            'access_path' => AiPersona::ACCESS_PATH_ROOT,
         ]));
     }
 
     public function test_a_bot_can_keep_its_own_slug_on_update(): void
     {
         $system = $this->makeSystem();
-        $bot = $this->makeBot($system);
+        $persona = $this->makePersona($system);
 
-        $updated = $this->app->make(AiChatBotManager::class)->update($bot, [
+        $updated = $this->app->make(AiPersonaManager::class)->update($persona, [
             'name' => 'Renamed Bot',
             'slug' => 'test-bot',
-            'access_path' => AiChatBot::ACCESS_PATH_CHAT,
+            'access_path' => AiPersona::ACCESS_PATH_CHAT,
             'ai_system_id' => $system->id,
-            'prompt_template' => 'You are {{bot_name}}.',
+            'prompt_template' => 'You are {{persona_name}}.',
         ]);
 
         $this->assertSame('Renamed Bot', $updated->name);
@@ -200,7 +200,7 @@ class ManagementServicesTest extends TestCase
     public function test_tool_listing_respects_the_systems_allow_list(): void
     {
         $system = $this->makeSystem(['allowed_tools' => ['fetch-web-page']]);
-        $manager = $this->app->make(AiChatBotManager::class);
+        $manager = $this->app->make(AiPersonaManager::class);
 
         $scoped = $manager->availableTools($system->id);
         $this->assertSame(['fetch-web-page'], array_column($scoped, 'name'));
@@ -215,20 +215,20 @@ class ManagementServicesTest extends TestCase
 
     // ----------------------------------------------------------- conversations
 
-    private function makeConversation(AiChatBot $bot, array $overrides = []): AiConversation
+    private function makeConversation(AiPersona $persona, array $overrides = []): AiConversation
     {
         return AiConversation::create(array_merge([
-            'ai_system_id' => $bot->ai_system_id,
-            'ai_chat_bot_id' => $bot->id,
-            'feature' => 'chat-bot:test-bot',
+            'ai_system_id' => $persona->ai_system_id,
+            'ai_persona_id' => $persona->id,
+            'feature' => 'persona:test-bot',
             'title' => 'A conversation',
         ], $overrides));
     }
 
     public function test_message_counts_exclude_system_messages(): void
     {
-        $bot = $this->makeBot($this->makeSystem());
-        $conversation = $this->makeConversation($bot);
+        $persona = $this->makePersona($this->makeSystem());
+        $conversation = $this->makeConversation($persona);
 
         foreach (['system', 'user', 'assistant'] as $role) {
             AiConversationMessage::create([
@@ -247,26 +247,26 @@ class ManagementServicesTest extends TestCase
     {
         $system = $this->makeSystem();
         $other = $this->makeSystem(['name' => 'Other']);
-        $bot = $this->makeBot($system);
+        $persona = $this->makePersona($system);
 
-        $this->makeConversation($bot, ['feature' => 'chat-bot:alpha']);
-        $this->makeConversation($bot, ['feature' => 'chat-bot:beta', 'ai_system_id' => $other->id]);
+        $this->makeConversation($persona, ['feature' => 'persona:alpha']);
+        $this->makeConversation($persona, ['feature' => 'persona:beta', 'ai_system_id' => $other->id]);
 
         $manager = $this->app->make(AiConversationManager::class);
 
-        $this->assertCount(1, $manager->paginate(['feature' => 'chat-bot:alpha'])->items());
+        $this->assertCount(1, $manager->paginate(['feature' => 'persona:alpha'])->items());
         $this->assertCount(1, $manager->paginate(['ai_system_id' => $other->id])->items());
         $this->assertCount(2, $manager->paginate()->items());
     }
 
     public function test_search_matches_titles_visitors_and_message_bodies(): void
     {
-        $bot = $this->makeBot($this->makeSystem());
+        $persona = $this->makePersona($this->makeSystem());
         $manager = $this->app->make(AiConversationManager::class);
 
-        $byTitle = $this->makeConversation($bot, ['title' => 'Unique title here']);
-        $byVisitor = $this->makeConversation($bot, ['title' => 'Other', 'visitor_email' => 'zebra@example.test']);
-        $byMessage = $this->makeConversation($bot, ['title' => 'Third']);
+        $byTitle = $this->makeConversation($persona, ['title' => 'Unique title here']);
+        $byVisitor = $this->makeConversation($persona, ['title' => 'Other', 'visitor_email' => 'zebra@example.test']);
+        $byMessage = $this->makeConversation($persona, ['title' => 'Third']);
 
         AiConversationMessage::create([
             'ai_conversation_id' => $byMessage->id,
@@ -281,8 +281,8 @@ class ManagementServicesTest extends TestCase
 
     public function test_search_ignores_system_message_content(): void
     {
-        $bot = $this->makeBot($this->makeSystem());
-        $conversation = $this->makeConversation($bot, ['title' => 'Plain']);
+        $persona = $this->makePersona($this->makeSystem());
+        $conversation = $this->makeConversation($persona, ['title' => 'Plain']);
 
         AiConversationMessage::create([
             'ai_conversation_id' => $conversation->id,
@@ -297,8 +297,8 @@ class ManagementServicesTest extends TestCase
 
     public function test_detail_returns_messages_in_order_with_correlated_memories(): void
     {
-        $bot = $this->makeBot($this->makeSystem());
-        $conversation = $this->makeConversation($bot);
+        $persona = $this->makePersona($this->makeSystem());
+        $conversation = $this->makeConversation($persona);
 
         AiConversationMessage::create([
             'ai_conversation_id' => $conversation->id,
@@ -315,7 +315,7 @@ class ManagementServicesTest extends TestCase
 
         foreach ([60, 90] as $confidence) {
             AiFeatureMemory::create([
-                'feature' => 'chat-bot:test-bot',
+                'feature' => 'persona:test-bot',
                 'category' => 'preference',
                 'key' => "key-{$confidence}",
                 'content' => 'Something learned',
@@ -341,7 +341,7 @@ class ManagementServicesTest extends TestCase
             ['key' => 'active-high', 'confidence' => 80, 'is_active' => true],
         ] as $attributes) {
             AiFeatureMemory::create(array_merge([
-                'feature' => 'chat-bot:test-bot',
+                'feature' => 'persona:test-bot',
                 'category' => 'preference',
                 'content' => 'Something learned',
             ], $attributes));

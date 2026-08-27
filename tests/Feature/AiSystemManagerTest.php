@@ -6,7 +6,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiSystemFeatureDefault;
 use Jvjvjv\CodeTalker\Models\AiSystemPrompt;
@@ -196,11 +196,11 @@ class AiSystemManagerTest extends TestCase
         $system = $this->manager()->create($this->validAttributes());
 
         foreach (['one', 'two'] as $slug) {
-            AiChatBot::create([
+            AiPersona::create([
                 'ai_system_id' => $system->id,
                 'name' => "Bot {$slug}",
                 'slug' => $slug,
-                'prompt_template' => 'You are {{bot_name}}.',
+                'prompt_template' => 'You are {{persona_name}}.',
                 'is_active' => true,
             ]);
         }
@@ -208,9 +208,9 @@ class AiSystemManagerTest extends TestCase
         $deactivated = $this->manager()->delete($system);
 
         $this->assertSame(2, $deactivated);
-        $this->assertSame(0, AiChatBot::where('is_active', true)->count());
+        $this->assertSame(0, AiPersona::where('is_active', true)->count());
         // Deactivated, not deleted — the relationship and its history survive.
-        $this->assertSame(2, AiChatBot::count());
+        $this->assertSame(2, AiPersona::count());
         $this->assertSoftDeleted($system);
     }
 
@@ -224,51 +224,53 @@ class AiSystemManagerTest extends TestCase
     public function test_duplicating_a_system_marks_the_copy_and_leaves_feature_defaults_alone(): void
     {
         $system = $this->manager()->create($this->validAttributes([
-            'feature_defaults' => ['chat-bot:support'],
+            'feature_defaults' => ['persona:support'],
         ]));
 
         $clone = $this->manager()->duplicate($system);
 
         $this->assertSame('Test System (copy)', $clone->name);
         $this->assertNotSame($system->id, $clone->id);
+        $this->assertNotNull($clone->duplicated_at);
+        $this->assertNull($system->duplicated_at);
 
         // A feature has one default system; copying the claims would silently
         // steal them from the original.
         $this->assertSame(
             $system->id,
-            AiSystemFeatureDefault::where('feature', 'chat-bot:support')->value('ai_system_id')
+            AiSystemFeatureDefault::where('feature', 'persona:support')->value('ai_system_id')
         );
     }
 
     public function test_duplicating_can_copy_feature_defaults_when_asked(): void
     {
         $system = $this->manager()->create($this->validAttributes([
-            'feature_defaults' => ['chat-bot:support'],
+            'feature_defaults' => ['persona:support'],
         ]));
 
         $clone = $this->manager()->duplicate($system, copyFeatureDefaults: true);
 
         $this->assertSame(
             $clone->id,
-            AiSystemFeatureDefault::where('feature', 'chat-bot:support')->value('ai_system_id')
+            AiSystemFeatureDefault::where('feature', 'persona:support')->value('ai_system_id')
         );
     }
 
     public function test_claiming_a_feature_takes_it_from_the_system_that_held_it(): void
     {
         $first = $this->manager()->create($this->validAttributes([
-            'feature_defaults' => ['chat-bot:support'],
+            'feature_defaults' => ['persona:support'],
         ]));
 
         $second = $this->manager()->create($this->validAttributes([
             'name' => 'Second System',
-            'feature_defaults' => ['chat-bot:support'],
+            'feature_defaults' => ['persona:support'],
         ]));
 
-        $this->assertSame(1, AiSystemFeatureDefault::where('feature', 'chat-bot:support')->count());
+        $this->assertSame(1, AiSystemFeatureDefault::where('feature', 'persona:support')->count());
         $this->assertSame(
             $second->id,
-            AiSystemFeatureDefault::where('feature', 'chat-bot:support')->value('ai_system_id')
+            AiSystemFeatureDefault::where('feature', 'persona:support')->value('ai_system_id')
         );
         $this->assertSame(0, AiSystemFeatureDefault::where('ai_system_id', $first->id)->count());
     }

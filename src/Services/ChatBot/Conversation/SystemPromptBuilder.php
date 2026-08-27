@@ -2,14 +2,14 @@
 
 namespace Jvjvjv\CodeTalker\Services\ChatBot\Conversation;
 
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Services\AiMemoryService;
 
 /**
- * Assembles the system prompt a bot runs under: the AiSystem's base prompt, the
- * bot's own template with its placeholders filled in, and anything the memory
- * system has learned about this particular visitor.
+ * Assembles the system prompt a persona runs under: the AiSystem's base
+ * prompt, the persona's own template with its placeholders filled in, and
+ * anything the memory system has learned about this particular visitor.
  */
 class SystemPromptBuilder
 {
@@ -19,21 +19,21 @@ class SystemPromptBuilder
     }
 
     public function build(
-        AiChatBot $bot,
+        AiPersona $persona,
         ?AiConversation $conversation = null,
         ?string $visitorName = null,
         ?string $visitorEmail = null,
     ): string {
-        $prompt = strtr($bot->prompt_template, [
-            '{{bot_name}}' => $bot->name,
-            '{{bot_slug}}' => $bot->slug,
-            '{{bot_description}}' => $bot->description ?? '',
+        $prompt = strtr($persona->prompt_template, [
+            '{{persona_name}}' => $persona->name,
+            '{{persona_slug}}' => $persona->slug,
+            '{{persona_description}}' => $persona->description ?? '',
             '{{visitor_name}}' => $visitorName ?? '',
             '{{visitor_email}}' => $visitorEmail ?? '',
         ]);
 
-        $systemPrompt = trim((string) $bot->aiSystem?->system_prompt);
-        $memoryPrompt = trim($this->memories($bot, $conversation));
+        $systemPrompt = trim((string) $persona->aiSystem?->system_prompt);
+        $memoryPrompt = trim($this->memories($persona, $conversation));
 
         return collect([
             $systemPrompt !== '' ? $systemPrompt : null,
@@ -47,7 +47,7 @@ class SystemPromptBuilder
      * identity comes from the conversation itself; when opening one, the only
      * identity available is the authenticated user, if any.
      */
-    private function memories(AiChatBot $bot, ?AiConversation $conversation): string
+    private function memories(AiPersona $persona, ?AiConversation $conversation): string
     {
         $userId = null;
         $visitorEmail = null;
@@ -59,6 +59,6 @@ class SystemPromptBuilder
             $userId = auth()->id();
         }
 
-        return $this->memoryService->getMemoriesForPrompt($bot->featureKey(), $userId, $visitorEmail);
+        return $this->memoryService->getMemoriesForPrompt($persona->featureKey(), $userId, $visitorEmail);
     }
 }

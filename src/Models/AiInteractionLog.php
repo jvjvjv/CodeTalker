@@ -13,7 +13,7 @@ class AiInteractionLog extends Model
     protected $fillable = [
         'ai_system_id',
         'ai_conversation_id',
-        'ai_chat_bot_id',
+        'ai_persona_id',
         'user_id',
         'feature',
         'input_tokens',
@@ -51,9 +51,9 @@ class AiInteractionLog extends Model
         return $this->belongsTo(config('code-talker.user_model'));
     }
 
-    public function aiChatBot(): BelongsTo
+    public function aiPersona(): BelongsTo
     {
-        return $this->belongsTo(AiChatBot::class);
+        return $this->belongsTo(AiPersona::class);
     }
 
     public function conversation(): BelongsTo

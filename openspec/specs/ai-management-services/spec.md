@@ -30,10 +30,10 @@ The package SHALL expose a service that performs every write operation on `AiSys
 - **WHEN** an update omits `base_url` or supplies it blank
 - **THEN** the stored base URL is used for capability hydration rather than an empty one
 
-#### Scenario: Deleting a system deactivates its chat bots
+#### Scenario: Deleting a system deactivates its personas
 
-- **WHEN** a system with linked chat bots is deleted
-- **THEN** every linked chat bot is deactivated rather than deleted
+- **WHEN** a system with linked personas is deleted
+- **THEN** every linked persona is deactivated rather than deleted
 - **AND** the service reports how many were deactivated
 - **AND** the system is soft-deleted
 
@@ -88,22 +88,22 @@ The package SHALL expose a service for reusable system prompt records, including
 - **AND** the service reports how many systems were affected
 - **AND** the clearing and the deletion occur in a single transaction
 
-### Requirement: Chat bots are managed through a service
+### Requirement: Personas are managed through a service
 
-The package SHALL expose a service that creates, updates, deletes, and lists chat bots, including the usage rollups and tool listings an admin screen displays.
+The package SHALL expose a service that creates, updates, deletes, and lists personas, including the usage rollups and tool listings an admin screen displays.
 
-#### Scenario: Listing bots with lifetime usage
+#### Scenario: Listing personas with lifetime usage
 
-- **WHEN** a host lists chat bots
+- **WHEN** a host lists personas
 - **THEN** each carries its conversation count and aggregated input tokens, output tokens, and cost
-- **AND** the usage block is absent for a bot whose conversations have no recorded cost
+- **AND** the usage block is absent for a persona whose conversations have no recorded cost
 
 #### Scenario: Reserved root slugs are rejected
 
-- **WHEN** a bot is saved with a root access path and a slug reserved by the host application
+- **WHEN** a persona is saved with a root access path and a slug reserved by the host application
 - **THEN** validation fails with a message explaining the conflict
 
-#### Scenario: Listing the tools a bot would expose
+#### Scenario: Listing the tools a persona would expose
 
 - **WHEN** a host asks which tools are available, optionally scoped to a system
 - **THEN** it receives the tool names and descriptions the chat loop would expose
@@ -111,12 +111,12 @@ The package SHALL expose a service that creates, updates, deletes, and lists cha
 
 ### Requirement: Conversations are searchable through a service
 
-The package SHALL expose a service that filters, searches, and inspects stored conversations, so an operator can find one without querying the models directly.
+The package SHALL expose a service that filters, searches, and inspects stored conversations, so an operator (a human administrator, not an `AiOperator` record) can find one without querying the models directly.
 
 #### Scenario: Filtering and searching
 
-- **WHEN** a host queries conversations with any combination of feature, status, system, bot, and a free-text search
-- **THEN** the search matches conversation title, visitor name and email, the related user's name and email, the related bot's name and slug, and the content of non-system messages
+- **WHEN** a host queries conversations with any combination of feature, status, system, persona, and a free-text search
+- **THEN** the search matches conversation title, visitor name and email, the related user's name and email, the related persona's name and slug, and the content of non-system messages
 
 #### Scenario: System messages are excluded from user-facing counts
 

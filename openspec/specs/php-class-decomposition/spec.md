@@ -11,7 +11,7 @@ A collaborator shared by more than one class has no single origin class, and SHA
 
 #### Scenario: A responsibility is extracted from a large class
 
-- **WHEN** a distinct responsibility is lifted out of `ChatBotController`, `AiChatBotConversationService`, or `SearchWebTool`
+- **WHEN** a distinct responsibility is lifted out of `ChatBotController`, `AiPersonaConversationService`, or `SearchWebTool`
 - **THEN** it is placed in one file in the namespace named for its origin class
 - **AND** it is placed there even if it has exactly one caller
 
@@ -38,13 +38,13 @@ The refactor SHALL NOT change any signature that code outside the refactored cla
 
 #### Scenario: Conversation service is constructed positionally by tests
 
-- **WHEN** `AiChatBotConversationService` is instantiated with `AgentFactory`, `AiMemoryService`, `ConversationUsageService`, `RawExchangeContext`, `AiSystemProviderConfigurator` in that positional order
+- **WHEN** `AiPersonaConversationService` is instantiated with `AgentFactory`, `AiMemoryService`, `ConversationUsageService`, `RawExchangeContext`, `AiSystemProviderConfigurator` in that positional order
 - **THEN** construction succeeds
 - **AND** no additional constructor parameter is required
 
 #### Scenario: Conversation service guards remain overridable
 
-- **WHEN** a subclass of `AiChatBotConversationService` overrides `protected function streamElapsedSeconds(float $startedAt): float` or `protected function clientAborted(): bool`
+- **WHEN** a subclass of `AiPersonaConversationService` overrides `protected function streamElapsedSeconds(float $startedAt): float` or `protected function clientAborted(): bool`
 - **THEN** `continueConversation()` consults the subclass's override for every guard check
 - **AND** the max-stream-duration and client-abort behaviors driven by those overrides are unchanged
 

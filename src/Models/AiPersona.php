@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-class AiChatBot extends Model
+class AiPersona extends Model
 {
     use HasFactory;
     use SoftDeletes;
@@ -101,7 +101,7 @@ class AiChatBot extends Model
 
     public function featureKey(): string
     {
-        return 'chat-bot:' . $this->slug;
+        return 'persona:' . $this->slug;
     }
 
     public function resolvedTemperature(): ?float

@@ -48,7 +48,7 @@ class CodeTalkerConversationStore implements ConversationStore
 
     /**
      * Not supported: this package's conversations require an AiSystem (and
-     * usually an AiChatBot) that the contract gives no way to supply.
+     * usually an AiPersona) that the contract gives no way to supply.
      *
      * The framework calls this only when an agent has a participant but no
      * current conversation. The package never takes that path — it always
@@ -61,7 +61,7 @@ class CodeTalkerConversationStore implements ConversationStore
     {
         throw new LogicException(
             'Code Talker conversations cannot be created from a conversation store, because they '
-            . 'require an AiSystem. Open one with AiChatBotConversationService::startConversation() '
+            . 'require an AiSystem. Open one with AiPersonaConversationService::startConversation() '
             . '(or create an AiConversation directly), then resume the agent onto it with '
             . 'continue() or withStoredConversation().'
         );

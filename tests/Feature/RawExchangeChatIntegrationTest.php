@@ -6,11 +6,11 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Models\AiProviderExchange;
 use Jvjvjv\CodeTalker\Models\AiSystem;
-use Jvjvjv\CodeTalker\Services\AiChatBotConversationService;
+use Jvjvjv\CodeTalker\Services\AiPersonaConversationService;
 use Jvjvjv\CodeTalker\Tests\TestCase;
 
 class RawExchangeChatIntegrationTest extends TestCase
@@ -58,16 +58,16 @@ class RawExchangeChatIntegrationTest extends TestCase
             'is_active' => true,
         ]);
 
-        $bot = AiChatBot::create([
+        $persona = AiPersona::create([
             'ai_system_id' => $system->id,
             'name' => 'Local Bot',
             'slug' => 'local-bot',
-            'prompt_template' => 'You are {{bot_name}}.',
+            'prompt_template' => 'You are {{persona_name}}.',
             'is_active' => true,
         ]);
 
-        $service = $this->app->make(AiChatBotConversationService::class);
-        $conversation = $service->startConversation($bot);
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
 
         foreach ($service->continueConversation($conversation, 'Hello') as $line) {
             // drain the stream

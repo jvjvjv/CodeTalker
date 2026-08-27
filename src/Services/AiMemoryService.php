@@ -28,7 +28,7 @@ class AiMemoryService
      * - For visitors (email): memories tied to their email address
      * This allows each individual user to have persistent chatbot memories while keeping different users' data separate.
      *
-     * @param string $feature The feature key (e.g., 'chat-bot:resume-assistant')
+     * @param string $feature The feature key (e.g., 'persona:resume-assistant')
      * @param string|int|null $userId User ID if logged in, null for visitors (supports both UUID and integer IDs)
      * @param string|null $email Email address for visitors or when user_id is unavailable
      */

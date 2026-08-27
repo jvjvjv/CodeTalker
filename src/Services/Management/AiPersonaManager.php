@@ -5,15 +5,15 @@ namespace Jvjvjv\CodeTalker\Services\Management;
 use Closure;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\Mcp\ChatBotToolRegistry;
 
 /**
- * Management operations over chat-bot personas.
+ * Management operations over personas.
  */
-class AiChatBotManager
+class AiPersonaManager
 {
     /**
      * @param array<string, mixed> $data the payload being validated, needed
@@ -27,20 +27,20 @@ class AiChatBotManager
 
     /**
      * @param array<string, mixed> $data
-     * @param AiChatBot|null $bot the bot being edited, so its own slug does not
-     *        collide with itself on the uniqueness check
+     * @param AiPersona|null $persona the persona being edited, so its own slug
+     *        does not collide with itself on the uniqueness check
      * @return array<string, mixed>
      */
-    public static function updateRules(array $data = [], ?AiChatBot $bot = null): array
+    public static function updateRules(array $data = [], ?AiPersona $persona = null): array
     {
-        return static::sharedRules($data, $bot);
+        return static::sharedRules($data, $persona);
     }
 
     /**
      * @param array<string, mixed> $data
      * @return array<string, mixed>
      */
-    protected static function sharedRules(array $data, ?AiChatBot $bot): array
+    protected static function sharedRules(array $data, ?AiPersona $persona): array
     {
         return [
             'name' => ['required', 'string', 'max:255'],
@@ -49,18 +49,19 @@ class AiChatBotManager
                 'string',
                 'max:255',
                 'alpha_dash',
-                Rule::unique('ai_chat_bots', 'slug')->ignore($bot?->id),
-                // A root-mounted bot occupies a top-level path, so its slug can
-                // shadow a host application route. Reserved slugs are refused
-                // only for root mounting; under /chat/ there is no conflict.
+                Rule::unique('ai_personas', 'slug')->ignore($persona?->id),
+                // A root-mounted persona occupies a top-level path, so its slug
+                // can shadow a host application route. Reserved slugs are
+                // refused only for root mounting; under /chat/ there is no
+                // conflict.
                 static function (string $attribute, mixed $value, Closure $fail) use ($data): void {
-                    if (($data['access_path'] ?? null) === AiChatBot::ACCESS_PATH_ROOT
-                        && in_array((string) $value, AiChatBot::reservedRootSlugs(), true)) {
+                    if (($data['access_path'] ?? null) === AiPersona::ACCESS_PATH_ROOT
+                        && in_array((string) $value, AiPersona::reservedRootSlugs(), true)) {
                         $fail('This slug is reserved for an existing site route and cannot be used from the root path.');
                     }
                 },
             ],
-            'access_path' => ['required', Rule::in([AiChatBot::ACCESS_PATH_CHAT, AiChatBot::ACCESS_PATH_ROOT])],
+            'access_path' => ['required', Rule::in([AiPersona::ACCESS_PATH_CHAT, AiPersona::ACCESS_PATH_ROOT])],
             'description' => ['nullable', 'string'],
             'ai_system_id' => ['required', 'integer', 'exists:ai_systems,id'],
             'context_length' => ['nullable', 'integer', 'min:1', 'max:200000'],
@@ -75,9 +76,9 @@ class AiChatBotManager
     /**
      * @param array<string, mixed> $data
      */
-    public function create(array $data): AiChatBot
+    public function create(array $data): AiPersona
     {
-        return AiChatBot::create(
+        return AiPersona::create(
             Validator::make($data, static::createRules($data))->validate()
         );
     }
@@ -85,25 +86,25 @@ class AiChatBotManager
     /**
      * @param array<string, mixed> $data
      */
-    public function update(AiChatBot $bot, array $data): AiChatBot
+    public function update(AiPersona $persona, array $data): AiPersona
     {
-        $bot->update(
-            Validator::make($data, static::updateRules($data, $bot))->validate()
+        $persona->update(
+            Validator::make($data, static::updateRules($data, $persona))->validate()
         );
 
-        return $bot;
+        return $persona;
     }
 
-    public function delete(AiChatBot $bot): void
+    public function delete(AiPersona $persona): void
     {
-        $bot->delete();
+        $persona->delete();
     }
 
     /**
-     * Bots with their conversation counts and lifetime token/cost totals.
+     * Personas with their conversation counts and lifetime token/cost totals.
      *
      * The usage block is null rather than zeroed when no conversation has a
-     * recorded cost, so a bot that has never been costed is distinguishable
+     * recorded cost, so a persona that has never been costed is distinguishable
      * from one that genuinely cost nothing. `total_tokens` and `synced_at` are
      * always null here: neither is meaningful across an aggregate.
      *
@@ -111,7 +112,7 @@ class AiChatBotManager
      */
     public function listWithUsage(?int $aiSystemId = null): array
     {
-        return AiChatBot::query()
+        return AiPersona::query()
             ->with('aiSystem')
             ->withCount('conversations')
             ->withSum('conversations', 'usage_input_tokens')
@@ -120,23 +121,23 @@ class AiChatBotManager
             ->when($aiSystemId !== null, fn ($query) => $query->where('ai_system_id', $aiSystemId))
             ->orderBy('name')
             ->get()
-            ->map(static fn (AiChatBot $bot): array => [
-                'id' => $bot->id,
-                'name' => $bot->name,
-                'slug' => $bot->slug,
-                'access_path' => $bot->access_path,
-                'public_url' => $bot->publicPath(),
-                'description' => $bot->description,
-                'is_active' => $bot->is_active,
-                'ai_system' => $bot->aiSystem,
-                'require_visitor_identity' => $bot->require_visitor_identity,
-                'conversations_count' => $bot->conversations_count,
-                'tools_enabled' => $bot->tools_enabled,
-                'usage' => $bot->conversations_sum_usage_cost_usd !== null ? [
-                    'input_tokens' => (int) ($bot->conversations_sum_usage_input_tokens ?? 0),
-                    'output_tokens' => (int) ($bot->conversations_sum_usage_output_tokens ?? 0),
+            ->map(static fn (AiPersona $persona): array => [
+                'id' => $persona->id,
+                'name' => $persona->name,
+                'slug' => $persona->slug,
+                'access_path' => $persona->access_path,
+                'public_url' => $persona->publicPath(),
+                'description' => $persona->description,
+                'is_active' => $persona->is_active,
+                'ai_system' => $persona->aiSystem,
+                'require_visitor_identity' => $persona->require_visitor_identity,
+                'conversations_count' => $persona->conversations_count,
+                'tools_enabled' => $persona->tools_enabled,
+                'usage' => $persona->conversations_sum_usage_cost_usd !== null ? [
+                    'input_tokens' => (int) ($persona->conversations_sum_usage_input_tokens ?? 0),
+                    'output_tokens' => (int) ($persona->conversations_sum_usage_output_tokens ?? 0),
                     'total_tokens' => null,
-                    'cost_usd' => (float) $bot->conversations_sum_usage_cost_usd,
+                    'cost_usd' => (float) $persona->conversations_sum_usage_cost_usd,
                     'synced_at' => null,
                 ] : null,
             ])
@@ -144,8 +145,8 @@ class AiChatBotManager
     }
 
     /**
-     * Active systems shaped for a bot form, so it can show what each system
-     * would contribute if the bot inherits its settings.
+     * Active systems shaped for a persona form, so it can show what each
+     * system would contribute if the persona inherits its settings.
      *
      * @return array<int, array{id: int, name: string, model: string, context_length: int|null, temperature: float|null, supports_tools: bool}>
      */

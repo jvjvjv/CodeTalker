@@ -3,7 +3,7 @@
 namespace Jvjvjv\CodeTalker\Services\ChatBot;
 
 use Illuminate\Support\Collection;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 
@@ -46,10 +46,10 @@ class ChatBotPresenter
     /**
      * What every conversation with this bot has cost so far.
      */
-    public function totalCostUsd(AiChatBot $bot): float
+    public function totalCostUsd(AiPersona $bot): float
     {
         return (float) (AiConversation::query()
-            ->where('ai_chat_bot_id', $bot->id)
+            ->where('ai_persona_id', $bot->id)
             ->sum('usage_cost_usd') ?? 0);
     }
 
@@ -61,7 +61,7 @@ class ChatBotPresenter
      * durable to key on, which is exactly why the package used to keep a cookie.
      * A host that wants that behaviour now owns it.
      *
-     * @param Collection<int, AiChatBot> $bots
+     * @param Collection<int, AiPersona> $bots
      * @return array<int, array<int, array{title: string, updated_at: ?string, updated_at_human: string, is_stale: bool}>>
      */
     public function conversationsFor(mixed $user, Collection $bots): array
@@ -72,10 +72,10 @@ class ChatBotPresenter
 
         return AiConversation::query()
             ->where('user_id', $user->id)
-            ->whereIn('ai_chat_bot_id', $bots->pluck('id')->all())
+            ->whereIn('ai_persona_id', $bots->pluck('id')->all())
             ->orderByLastMessageAtDesc()
             ->get()
-            ->groupBy('ai_chat_bot_id')
+            ->groupBy('ai_persona_id')
             ->map(static fn (Collection $conversations): array => $conversations
                 ->map(static fn (AiConversation $conversation): array => [
                     'title' => trim((string) ($conversation->title ?: 'New chat')),

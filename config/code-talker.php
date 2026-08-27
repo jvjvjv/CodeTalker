@@ -157,7 +157,7 @@ return [
 
             // The domain allow-list for a caller with no AiSystem at all —
             // the external MCP server (Claude Desktop, etc.), which has no
-            // conversation and so no AiChatBot/AiSystem to carry its own
+            // conversation and so no AiPersona/AiSystem to carry its own
             // web_tool_policy. Comma-separated hostnames, e.g.
             // "api.example.com,1f916.ai". Empty means unrestricted, same as
             // an AiSystem with no web_tool_policy. This is consulted only

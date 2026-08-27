@@ -3,7 +3,7 @@
 namespace Jvjvjv\CodeTalker\Services;
 
 use Jvjvjv\CodeTalker\Enums\AiProvider;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
 use Throwable;
@@ -101,7 +101,7 @@ class AiModelReadinessService
     /**
      * @return array{state: string, provider: string, model: string, message: string, checked_at: string}
      */
-    public function statusForChatBot(AiChatBot $bot): array
+    public function statusForPersona(AiPersona $bot): array
     {
         $bot->loadMissing('aiSystem');
 
@@ -111,11 +111,11 @@ class AiModelReadinessService
     /**
      * @return array{state: string, provider: string, model: string, message: string, checked_at: string, warmup_attempted: bool}
      */
-    public function warmUpChatBot(AiChatBot $bot): array
+    public function warmUpPersona(AiPersona $bot): array
     {
         $bot->loadMissing('aiSystem');
 
-        $initialStatus = $this->statusForChatBot($bot);
+        $initialStatus = $this->statusForPersona($bot);
 
         if ($initialStatus['state'] === 'loaded') {
             return $initialStatus + ['warmup_attempted' => false];
@@ -124,7 +124,7 @@ class AiModelReadinessService
         return $this->attemptWarmUp(
             $bot->aiSystem,
             $bot->resolvedContextLength(),
-            fn (): array => $this->statusForChatBot($bot),
+            fn (): array => $this->statusForPersona($bot),
             $initialStatus,
         );
     }

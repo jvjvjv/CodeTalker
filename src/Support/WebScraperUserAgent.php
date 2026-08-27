@@ -13,7 +13,7 @@ class WebScraperUserAgent
 
     public static function forConversation(AiConversation $conversation, string $purpose = 'research'): string
     {
-        return self::forBotName($conversation->aiChatBot?->name, $purpose);
+        return self::forBotName($conversation->aiPersona?->name, $purpose);
     }
 
     public static function forBotName(?string $botName, string $purpose = 'research'): string

@@ -49,18 +49,18 @@ Turn cancellation SHALL be injectable, so a turn driven outside a web request ca
 - **THEN** the turn consults it, and stops when it reports cancellation
 - **AND** whatever the turn produced before stopping is still persisted
 
-### Requirement: Chat bot access rules are enforced by the service
+### Requirement: Persona access rules are enforced by the service
 
 Rules that previously lived in the HTTP layer SHALL be enforced where the turn is started, so they cannot be lost by a host writing its own controller.
 
-#### Scenario: An inactive bot is refused
+#### Scenario: An inactive persona is refused
 
-- **WHEN** a conversation is started for an inactive chat bot
+- **WHEN** a conversation is started for an inactive persona
 - **THEN** it fails rather than opening one
 
-#### Scenario: A bot requiring visitor identity is given none
+#### Scenario: A persona requiring visitor identity is given none
 
-- **WHEN** a conversation is started for a bot requiring visitor identity without a name and email
+- **WHEN** a conversation is started for a persona requiring visitor identity without a name and email
 - **THEN** it fails with an error naming the requirement
 
 #### Scenario: The chat hash stays current
@@ -79,5 +79,5 @@ The queries a chat UI needs SHALL remain callable, so removing the pages does no
 
 #### Scenario: Listing a visitor's conversations
 
-- **WHEN** a host lists an authenticated user's conversations for a bot
+- **WHEN** a host lists an authenticated user's conversations for a persona
 - **THEN** it receives them most-recently-updated first, with their titles and timestamps

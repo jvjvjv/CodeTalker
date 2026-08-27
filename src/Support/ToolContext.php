@@ -51,7 +51,7 @@ final class ToolContext
      */
     public function botName(): ?string
     {
-        return $this->conversation?->aiChatBot?->name;
+        return $this->conversation?->aiPersona?->name;
     }
 
     /**
@@ -73,7 +73,7 @@ final class ToolContext
     public function webToolPolicy(): WebToolPolicy
     {
         if ($this->conversation !== null) {
-            return WebToolPolicy::fromArray($this->conversation->aiChatBot?->aiSystem?->web_tool_policy);
+            return WebToolPolicy::fromArray($this->conversation->aiPersona?->aiSystem?->web_tool_policy);
         }
 
         /** @var array<int, mixed> $configured */

@@ -4,7 +4,7 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Models\AiProviderExchange;
@@ -29,7 +29,7 @@ class ReadProviderExchangeCommandTest extends TestCase
     }
 
     /**
-     * @return array{system: AiSystem, bot: AiChatBot, conversation: AiConversation, request: AiLlmMessage, exchange: AiProviderExchange, orphan: AiProviderExchange}
+     * @return array{system: AiSystem, persona: AiPersona, conversation: AiConversation, request: AiLlmMessage, exchange: AiProviderExchange, orphan: AiProviderExchange}
      */
     private function seedExchange(): array
     {
@@ -42,18 +42,18 @@ class ReadProviderExchangeCommandTest extends TestCase
             'is_active' => true,
         ]);
 
-        $bot = AiChatBot::create([
+        $persona = AiPersona::create([
             'ai_system_id' => $system->id,
             'name' => 'Test Bot',
             'slug' => 'test-bot',
-            'prompt_template' => 'You are {{bot_name}}.',
+            'prompt_template' => 'You are {{persona_name}}.',
             'is_active' => true,
         ]);
 
         $conversation = AiConversation::create([
             'ai_system_id' => $system->id,
-            'ai_chat_bot_id' => $bot->id,
-            'feature' => 'chat-bot:test-bot',
+            'ai_persona_id' => $persona->id,
+            'feature' => 'persona:test-bot',
             'title' => 'My Conversation',
             'status' => 'active',
         ]);
@@ -116,7 +116,7 @@ class ReadProviderExchangeCommandTest extends TestCase
             'ai_llm_message_id' => null,
         ]);
 
-        return compact('system', 'bot', 'conversation', 'request', 'exchange', 'orphan');
+        return compact('system', 'persona', 'conversation', 'request', 'exchange', 'orphan');
     }
 
     public function test_it_renders_the_exchange_for_a_given_message_id(): void
@@ -147,14 +147,14 @@ class ReadProviderExchangeCommandTest extends TestCase
     {
         $data = $this->seedExchange();
 
-        $bot = $data['bot'];
+        $persona = $data['persona'];
         $conversation = AiConversation::find($data['conversation']->id);
         $request = AiLlmMessage::find($data['request']->id);
         $response = AiLlmMessage::where('ai_conversation_id', $conversation->id)
             ->where('direction', 'response')
             ->first();
 
-        $botLabel = $bot->name . ' (id ' . $bot->id . ')';
+        $botLabel = $persona->name . ' (id ' . $persona->id . ')';
         $convLabel = $conversation->title . ' (id ' . $conversation->id . ' · ' . $conversation->created_at . ')';
         $msgLabel = '#' . $request->turn_number . ' ' . $request->direction
             . ' (id ' . $request->id . ' · ' . $request->created_at . ')';
@@ -162,7 +162,7 @@ class ReadProviderExchangeCommandTest extends TestCase
             . ' (id ' . $response->id . ' · ' . $response->created_at . ')';
 
         $this->artisan('ai:read-exchange')
-            ->expectsChoice('Select a chat bot', $botLabel, [
+            ->expectsChoice('Select a persona', $botLabel, [
                 $botLabel,
                 '[unassigned conversations]',
             ])

@@ -5,7 +5,7 @@ namespace Jvjvjv\CodeTalker\Services;
 use Generator;
 use RuntimeException;
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\ConversationTitle;
@@ -24,7 +24,7 @@ use Jvjvjv\CodeTalker\Services\LaravelAi\StreamTranslator;
 use Jvjvjv\CodeTalker\Services\Mcp\ChatBotToolRegistry;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeContext;
 
-class AiChatBotConversationService
+class AiPersonaConversationService
 {
     private SystemPromptBuilder $systemPrompts;
 
@@ -71,53 +71,53 @@ class AiChatBotConversationService
     }
 
     /**
-     * Open a conversation with a bot.
+     * Open a conversation with a persona.
      *
      * The two guards here used to live in the controller. They are enforced at
      * the service now so a host writing its own controller cannot lose them:
-     * an inactive bot is not a chattable bot, and a bot that requires visitor
+     * an inactive persona is not chattable, and a persona that requires visitor
      * identity has no way to attribute a conversation without one.
      *
-     * @throws RuntimeException if the bot is inactive or required identity is missing
+     * @throws RuntimeException if the persona is inactive or required identity is missing
      */
-    public function startConversation(AiChatBot $bot, mixed $user = null, ?string $visitorName = null, ?string $visitorEmail = null): AiConversation
+    public function startConversation(AiPersona $persona, mixed $user = null, ?string $visitorName = null, ?string $visitorEmail = null): AiConversation
     {
-        if (! $bot->is_active) {
-            throw new RuntimeException("The chat bot '{$bot->slug}' is not active.");
+        if (! $persona->is_active) {
+            throw new RuntimeException("The persona '{$persona->slug}' is not active.");
         }
 
-        if ($bot->require_visitor_identity && (blank($visitorName) || blank($visitorEmail))) {
+        if ($persona->require_visitor_identity && (blank($visitorName) || blank($visitorEmail))) {
             throw new RuntimeException(
-                "The chat bot '{$bot->slug}' requires a visitor name and email."
+                "The persona '{$persona->slug}' requires a visitor name and email."
             );
         }
 
         $conversation = AiConversation::create([
             'user_id' => $user?->id,
-            'ai_system_id' => $bot->ai_system_id,
-            'ai_chat_bot_id' => $bot->id,
-            'feature' => $bot->featureKey(),
+            'ai_system_id' => $persona->ai_system_id,
+            'ai_persona_id' => $persona->id,
+            'feature' => $persona->featureKey(),
             'title' => null,
             'visitor_name' => $visitorName,
             'visitor_email' => $visitorEmail,
             'status' => AiConversationStatus::Active,
             'context' => [
-                'bot_slug' => $bot->slug,
-                'bot_name' => $bot->name,
+                'persona_slug' => $persona->slug,
+                'persona_name' => $persona->name,
             ],
         ]);
 
         AiConversationMessage::create([
             'ai_conversation_id' => $conversation->id,
             'role' => 'system',
-            'content' => $this->systemPrompts->build($bot, null, $visitorName, $visitorEmail),
+            'content' => $this->systemPrompts->build($persona, null, $visitorName, $visitorEmail),
         ]);
 
         return $conversation;
     }
 
     /**
-     * Continue a bot conversation by streaming the assistant response.
+     * Continue a persona conversation by streaming the assistant response.
      *
      * Yields structured events in the same Anthropic-shaped vocabulary the
      * documented stream has always used — `status`, `message_start`,
@@ -132,7 +132,7 @@ class AiChatBotConversationService
      */
     public function continueConversation(AiConversation $conversation, string $userMessage): Generator
     {
-        $conversation->loadMissing(['aiSystem', 'aiChatBot', 'messages']);
+        $conversation->loadMissing(['aiSystem', 'aiPersona', 'messages']);
 
         // The controller used to do this on every message. It is not just a
         // header value — it migrates a stale hash — so it moves here rather
@@ -159,7 +159,7 @@ class AiChatBotConversationService
         $system = $conversation->aiSystem;
         $turnNumber = $this->turns->nextFor($conversation);
         $startTime = microtime(true);
-        $temperature = $conversation->aiChatBot?->resolvedTemperature();
+        $temperature = $conversation->aiPersona?->resolvedTemperature();
 
         $requestPayload = new TurnRequestPayload($this->payloads->build(
             $system->model,
@@ -325,7 +325,7 @@ class AiChatBotConversationService
      */
     private function toolsFor(AiConversation $conversation): array
     {
-        if (!$conversation->aiChatBot?->tools_enabled) {
+        if (!$conversation->aiPersona?->tools_enabled) {
             return [];
         }
 

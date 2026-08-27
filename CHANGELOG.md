@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.14.0] — [unreleased]
+
+Renames the reactive, human-triggered persona concept from "chat bot" to
+"persona", and adds a new "operator" concept for AI work a host dispatches
+itself rather than a human triggering it.
+
+### Breaking Changes
+- **`AiChatBot` is renamed to `AiPersona`** — model, `ai_chat_bots` table (→ `ai_personas`), `AiChatBotManager` (→ `AiPersonaManager`), `AiChatBotConversationService` (→ `AiPersonaConversationService`, same constructor), the `ai_chat_bot_id` foreign key on `ai_conversations`/`ai_interaction_logs` (→ `ai_persona_id`), and `AiChatBot::featureKey()`'s `chat-bot:*` prefix (→ `persona:*`). Migrations rename the table/columns directly; re-publish and run migrations.
+- **`AiChatBot::prompt_template`'s placeholders are renamed** — `{{bot_name}}`/`{{bot_slug}}`/`{{bot_description}}` → `{{persona_name}}`/`{{persona_slug}}`/`{{persona_description}}`. Update any stored prompt templates.
+- **Existing `ai_system_feature_defaults.feature` rows using the `chat-bot:` prefix are migrated to `persona:`.** A host's own `feature_keys` config listing `chat-bot:*` keys is not something a migration can touch — update it manually.
+- Host apps providing a factory for the renamed model must rename `Database\Factories\AiChatBotFactory` to `AiPersonaFactory` (per `Factory::guessFactoryNamesUsing`).
+
+### New Features
+- Added `AiOperator`: a persona-shaped config for bounded, single-shot AI work triggered by something other than a human chat message — a host observer, an event listener, a scheduled job. The package owns no trigger or scheduling system; dispatching one is `dispatch(new RunAiOperatorJob($operator, $context))`, the same shape `ProcessAiMemoryJob` already uses.
+- `AiOperator::prompt_template` supports `{{dotted.path}}` placeholders resolved against the `$context` array passed at dispatch time. An unresolved placeholder fails the run before any provider call is made.
+- An operator run is bounded — one prompt through the same agentic tool loop a chat turn uses, then done — and is recorded as an `AiConversation` (`feature` = `operator:{slug}`), so it gets request/response logging, raw exchange capture, and cost tracking with no operator-specific logging path.
+- Added `Services/Management/AiOperatorManager`, mirroring the package's other management services (create/update/delete/list, static `rules()`).
 
 ## [0.13.0] — 2026-08-27
 

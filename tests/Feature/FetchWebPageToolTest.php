@@ -5,7 +5,7 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\Mcp\ToolResultConverter;
@@ -72,7 +72,7 @@ class FetchWebPageToolTest extends TestCase
         ]);
 
         $conversation = new AiConversation(['context' => []]);
-        $conversation->setRelation('aiChatBot', new AiChatBot(['name' => 'Research Bot']));
+        $conversation->setRelation('aiPersona', new AiPersona(['name' => 'Research Bot']));
 
         $tool = $this->tool(ToolContext::forConversation($conversation));
 
@@ -304,9 +304,9 @@ class FetchWebPageToolTest extends TestCase
     public function testARequestToADomainOutsideAScopedSystemsAllowListIsRefused(): void
     {
         $conversation = new AiConversation(['context' => []]);
-        $chatBot = new AiChatBot(['name' => 'Scoped Bot']);
-        $chatBot->setRelation('aiSystem', new AiSystem(['web_tool_policy' => ['allowed_domains' => ['allowed.example.com']]]));
-        $conversation->setRelation('aiChatBot', $chatBot);
+        $persona = new AiPersona(['name' => 'Scoped Bot']);
+        $persona->setRelation('aiSystem', new AiSystem(['web_tool_policy' => ['allowed_domains' => ['allowed.example.com']]]));
+        $conversation->setRelation('aiPersona', $persona);
 
         Http::fake();
 
