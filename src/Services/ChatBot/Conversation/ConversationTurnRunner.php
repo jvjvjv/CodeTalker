@@ -70,7 +70,7 @@ class ConversationTurnRunner
         $system = $conversation->aiSystem;
         $resolvedModel = $system->model;
         $maxTokens = $system->max_tokens;
-        $temperature = $conversation->aiChatBot?->resolvedTemperature();
+        $temperature = $conversation->aiPersona?->resolvedTemperature();
         $maxStreamSeconds = (int) config('code-talker.conversations.max_stream_seconds', 300);
 
         $prompt = $userMessage;
@@ -138,7 +138,7 @@ class ConversationTurnRunner
 
                     Log::debug('Chat bot API stream event', [
                         'conversation_id' => $conversation->id,
-                        'ai_chat_bot_id' => $conversation->ai_chat_bot_id,
+                        'ai_persona_id' => $conversation->ai_persona_id,
                         'ai_system_id' => $conversation->ai_system_id,
                         'turn_number' => $turnNumber,
                         'attempt' => $attempt,

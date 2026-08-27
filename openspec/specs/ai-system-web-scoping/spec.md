@@ -9,11 +9,11 @@ TBD - created by openspec-sync-specs from change scope-http-request-per-ai-syste
 An `AiSystem` MAY declare an `allowed_domains` list in its `web_tool_policy`. When present and non-empty, `fetch-web-page` and `http-request` calls made under that system SHALL be refused for any destination host not in the list, before any network request is attempted.
 
 #### Scenario: Request to an allowed domain succeeds
-- **WHEN** an `AiSystem` has `web_tool_policy.allowed_domains` containing `api.a.com`, and a chat bot using that system calls `http-request` for a URL on `api.a.com`
+- **WHEN** an `AiSystem` has `web_tool_policy.allowed_domains` containing `api.a.com`, and a persona using that system calls `http-request` for a URL on `api.a.com`
 - **THEN** the request proceeds through `HostGate`'s existing checks as normal
 
 #### Scenario: Request to a domain outside the allow-list is refused
-- **WHEN** an `AiSystem` has `web_tool_policy.allowed_domains` containing `api.a.com`, and a chat bot using that system calls `http-request` or `fetch-web-page` for a URL on `api.b.com`
+- **WHEN** an `AiSystem` has `web_tool_policy.allowed_domains` containing `api.a.com`, and a persona using that system calls `http-request` or `fetch-web-page` for a URL on `api.b.com`
 - **THEN** the request is refused before any DNS resolution or network call, with a caller-facing message naming the disallowed host
 
 #### Scenario: Unscoped AiSystem remains unrestricted

@@ -2,7 +2,7 @@
 
 namespace Jvjvjv\CodeTalker\Services\ChatBot;
 
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Services\AiModelReadinessService;
 
 /**
@@ -23,7 +23,7 @@ class ChatBotStatusResolver
      */
     public function statusesBySlug(): array
     {
-        $bots = AiChatBot::query()
+        $bots = AiPersona::query()
             ->active()
             ->with('aiSystem')
             ->orderBy('name')

@@ -11,7 +11,7 @@ class ChatBotToolRegistryTest extends TestCase
 {
     private function registry(?array $allowedTools): ChatBotToolRegistry
     {
-        $conversation = new AiConversation(['feature' => 'chat-bot:test']);
+        $conversation = new AiConversation(['feature' => 'persona:test']);
 
         return new ChatBotToolRegistry($conversation, $allowedTools);
     }
@@ -50,7 +50,7 @@ class ChatBotToolRegistryTest extends TestCase
      */
     public function test_discovery_finds_exactly_the_package_tools(): void
     {
-        $conversation = new AiConversation(['feature' => 'chat-bot:test']);
+        $conversation = new AiConversation(['feature' => 'persona:test']);
 
         $registry = new ChatBotToolRegistry(
             $conversation,

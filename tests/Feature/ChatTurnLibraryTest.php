@@ -4,11 +4,11 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 use Jvjvjv\CodeTalker\Models\AiSystem;
-use Jvjvjv\CodeTalker\Services\AiChatBotConversationService;
+use Jvjvjv\CodeTalker\Services\AiPersonaConversationService;
 use Jvjvjv\CodeTalker\Services\ChatBot\ChatBotPresenter;
 use Jvjvjv\CodeTalker\Services\ChatBot\SseFrameEncoder;
 use Jvjvjv\CodeTalker\Tests\TestCase;
@@ -34,7 +34,7 @@ class ChatTurnLibraryTest extends TestCase
         }
     }
 
-    private function makeBot(array $attributes = []): AiChatBot
+    private function makePersona(array $attributes = []): AiPersona
     {
         $system = AiSystem::create([
             'name' => 'Test System',
@@ -45,18 +45,18 @@ class ChatTurnLibraryTest extends TestCase
             'is_active' => true,
         ]);
 
-        return AiChatBot::create(array_merge([
+        return AiPersona::create(array_merge([
             'ai_system_id' => $system->id,
             'name' => 'Test Bot',
             'slug' => 'test-bot',
-            'prompt_template' => 'You are {{bot_name}}.',
+            'prompt_template' => 'You are {{persona_name}}.',
             'is_active' => true,
         ], $attributes));
     }
 
-    private function service(): AiChatBotConversationService
+    private function service(): AiPersonaConversationService
     {
-        return $this->app->make(AiChatBotConversationService::class);
+        return $this->app->make(AiPersonaConversationService::class);
     }
 
     // -------------------------------------------------------------- encoding
@@ -102,30 +102,30 @@ class ChatTurnLibraryTest extends TestCase
 
     public function test_an_inactive_bot_cannot_open_a_conversation(): void
     {
-        $bot = $this->makeBot(['is_active' => false]);
+        $persona = $this->makePersona(['is_active' => false]);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/not active/');
 
-        $this->service()->startConversation($bot);
+        $this->service()->startConversation($persona);
     }
 
     public function test_a_bot_requiring_identity_refuses_an_anonymous_visitor(): void
     {
-        $bot = $this->makeBot(['require_visitor_identity' => true]);
+        $persona = $this->makePersona(['require_visitor_identity' => true]);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessageMatches('/requires a visitor name and email/');
 
-        $this->service()->startConversation($bot);
+        $this->service()->startConversation($persona);
     }
 
     public function test_a_bot_requiring_identity_accepts_a_named_visitor(): void
     {
-        $bot = $this->makeBot(['require_visitor_identity' => true]);
+        $persona = $this->makePersona(['require_visitor_identity' => true]);
 
         $conversation = $this->service()->startConversation(
-            $bot,
+            $persona,
             visitorName: 'Ada',
             visitorEmail: 'ada@example.test',
         );
@@ -136,7 +136,7 @@ class ChatTurnLibraryTest extends TestCase
 
     public function test_a_bot_not_requiring_identity_accepts_an_anonymous_visitor(): void
     {
-        $conversation = $this->service()->startConversation($this->makeBot());
+        $conversation = $this->service()->startConversation($this->makePersona());
 
         $this->assertTrue($conversation->exists);
         $this->assertNull($conversation->visitor_name);
@@ -178,8 +178,8 @@ class ChatTurnLibraryTest extends TestCase
 
     public function test_the_transcript_excludes_the_system_prompt(): void
     {
-        $bot = $this->makeBot();
-        $conversation = $this->service()->startConversation($bot);
+        $persona = $this->makePersona();
+        $conversation = $this->service()->startConversation($persona);
 
         AiConversationMessage::create([
             'ai_conversation_id' => $conversation->id,
@@ -202,27 +202,27 @@ class ChatTurnLibraryTest extends TestCase
 
     public function test_a_bots_total_cost_sums_its_conversations(): void
     {
-        $bot = $this->makeBot();
+        $persona = $this->makePersona();
 
         foreach (['0.50', '0.25'] as $cost) {
             AiConversation::create([
-                'ai_system_id' => $bot->ai_system_id,
-                'ai_chat_bot_id' => $bot->id,
-                'feature' => 'chat-bot:test-bot',
+                'ai_system_id' => $persona->ai_system_id,
+                'ai_persona_id' => $persona->id,
+                'feature' => 'persona:test-bot',
                 'usage_cost_usd' => $cost,
             ]);
         }
 
-        $this->assertSame(0.75, $this->app->make(ChatBotPresenter::class)->totalCostUsd($bot));
+        $this->assertSame(0.75, $this->app->make(ChatBotPresenter::class)->totalCostUsd($persona));
     }
 
     public function test_an_anonymous_visitor_has_no_listed_conversations(): void
     {
-        $bot = $this->makeBot();
+        $persona = $this->makePersona();
 
         $this->assertSame(
             [],
-            $this->app->make(ChatBotPresenter::class)->conversationsFor(null, collect([$bot])),
+            $this->app->make(ChatBotPresenter::class)->conversationsFor(null, collect([$persona])),
         );
     }
 
@@ -230,8 +230,8 @@ class ChatTurnLibraryTest extends TestCase
 
     public function test_continuing_a_conversation_ensures_a_chat_hash(): void
     {
-        $bot = $this->makeBot();
-        $conversation = $this->service()->startConversation($bot);
+        $persona = $this->makePersona();
+        $conversation = $this->service()->startConversation($persona);
 
         $conversation->forceFill(['chat_hash' => null])->save();
 

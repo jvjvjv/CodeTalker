@@ -18,7 +18,7 @@ use Jvjvjv\CodeTalker\Models\AiFeatureMemory;
 class AiConversationManager
 {
     /**
-     * @param array{feature?: string|null, status?: string|null, ai_system_id?: int|string|null, ai_chat_bot_id?: int|string|null, search?: string|null} $filters
+     * @param array{feature?: string|null, status?: string|null, ai_system_id?: int|string|null, ai_persona_id?: int|string|null, search?: string|null} $filters
      */
     public function paginate(array $filters = [], int $perPage = 50): LengthAwarePaginator
     {
@@ -39,8 +39,8 @@ class AiConversationManager
             $query->where('ai_system_id', (int) $filters['ai_system_id']);
         }
 
-        if (filled($filters['ai_chat_bot_id'] ?? null)) {
-            $query->where('ai_chat_bot_id', (int) $filters['ai_chat_bot_id']);
+        if (filled($filters['ai_persona_id'] ?? null)) {
+            $query->where('ai_persona_id', (int) $filters['ai_persona_id']);
         }
 
         if (filled($filters['search'] ?? null)) {
@@ -67,10 +67,10 @@ class AiConversationManager
         return [
             'conversation' => array_merge($this->summarize($conversation), [
                 'context' => $conversation->context,
-                'ai_chat_bot' => $conversation->aiChatBot ? [
-                    'id' => $conversation->aiChatBot->id,
-                    'name' => $conversation->aiChatBot->name,
-                    'slug' => $conversation->aiChatBot->slug,
+                'ai_persona' => $conversation->aiPersona ? [
+                    'id' => $conversation->aiPersona->id,
+                    'name' => $conversation->aiPersona->name,
+                    'slug' => $conversation->aiPersona->slug,
                 ] : null,
             ]),
             'messages' => $conversation->messages
@@ -115,7 +115,7 @@ class AiConversationManager
 
     /**
      * Search across everything an operator might remember about a conversation:
-     * what it was called, who had it, which bot served it, and what was said.
+     * what it was called, who had it, which persona served it, and what was said.
      */
     private function applySearch(mixed $query, string $search): void
     {
@@ -127,8 +127,8 @@ class AiConversationManager
                     $userQuery->where('name', 'like', '%' . $search . '%')
                         ->orWhere('email', 'like', '%' . $search . '%');
                 })
-                ->orWhereHas('aiChatBot', function ($botQuery) use ($search): void {
-                    $botQuery->where('name', 'like', '%' . $search . '%')
+                ->orWhereHas('aiPersona', function ($personaQuery) use ($search): void {
+                    $personaQuery->where('name', 'like', '%' . $search . '%')
                         ->orWhere('slug', 'like', '%' . $search . '%');
                 })
                 ->orWhereHas('messages', function ($messageQuery) use ($search): void {
@@ -147,7 +147,7 @@ class AiConversationManager
      */
     private function relations(): array
     {
-        $relations = ['aiSystem', 'aiChatBot', 'user'];
+        $relations = ['aiSystem', 'aiPersona', 'user'];
 
         if (method_exists(AiConversation::class, 'targetedResume')) {
             $relations[] = 'targetedResume';
@@ -177,8 +177,8 @@ class AiConversationManager
             'user_name' => $conversation->user?->name,
             'user_email' => $conversation->user?->email,
             'ai_system_name' => $conversation->aiSystem?->name,
-            'ai_chat_bot_name' => $conversation->aiChatBot?->name,
-            'ai_chat_bot_slug' => $conversation->aiChatBot?->slug,
+            'ai_persona_name' => $conversation->aiPersona?->name,
+            'ai_persona_slug' => $conversation->aiPersona?->slug,
             'usage' => [
                 'input_tokens' => $conversation->usage_input_tokens,
                 'output_tokens' => $conversation->usage_output_tokens,

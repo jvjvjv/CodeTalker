@@ -4,7 +4,7 @@ namespace Jvjvjv\CodeTalker\Console\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Models\AiProviderExchange;
@@ -36,8 +36,8 @@ class ReadProviderExchangeCommand extends Command
 
     private function resolveMessageIdInteractively(): ?int
     {
-        // 1. Chat bot (plus an [unassigned] bucket for null ai_chat_bot_id).
-        $bots = AiChatBot::query()->orderBy('name')->get();
+        // 1. Persona (plus an [unassigned] bucket for null ai_persona_id).
+        $bots = AiPersona::query()->orderBy('name')->get();
 
         $botLabels = [];
         $botByLabel = [];
@@ -52,15 +52,15 @@ class ReadProviderExchangeCommand extends Command
         $botLabels[] = $unassignedLabel;
         $botByLabel[$unassignedLabel] = 'unassigned';
 
-        $botKey = $botByLabel[$this->choice('Select a chat bot', $botLabels)];
+        $botKey = $botByLabel[$this->choice('Select a persona', $botLabels)];
 
         // 2. Conversation.
         $conversationsQuery = AiConversation::query()->orderByDesc('created_at');
 
         if ($botKey === 'unassigned') {
-            $conversationsQuery->whereNull('ai_chat_bot_id');
+            $conversationsQuery->whereNull('ai_persona_id');
         } else {
-            $conversationsQuery->where('ai_chat_bot_id', (int) $botKey);
+            $conversationsQuery->where('ai_persona_id', (int) $botKey);
         }
 
         $conversations = $conversationsQuery->get();
@@ -179,7 +179,7 @@ class ReadProviderExchangeCommand extends Command
     {
         $system = $exchange->ai_system_id ? AiSystem::find($exchange->ai_system_id) : null;
         $conversation = $exchange->ai_conversation_id ? AiConversation::find($exchange->ai_conversation_id) : null;
-        $bot = $conversation?->aiChatBot;
+        $bot = $conversation?->aiPersona;
 
         $llm = $parser->llmResponse($this->siblingResponseData($exchange));
         $raw = $parser->sseResponse($exchange->raw_response);
@@ -188,7 +188,7 @@ class ReadProviderExchangeCommand extends Command
         $this->line('<info>Exchange</info> #' . $exchange->id . '  (' . $exchange->created_at . ')');
         $this->line('<info>System:</info>       ' . ($system?->name ?? '—'));
         $this->line('<info>Model:</info>        ' . ($exchange->model ?? '—'));
-        $this->line('<info>ChatBot:</info>      ' . ($bot?->name ?? '—'));
+        $this->line('<info>Persona:</info>      ' . ($bot?->name ?? '—'));
         $this->line('<info>Conversation:</info> ' . ($conversation?->title ?? '—'));
 
         $this->newLine();

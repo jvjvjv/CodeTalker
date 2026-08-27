@@ -47,6 +47,41 @@ After `--force`, re-apply any local customizations. If you'd rather not
 overwrite, diff your file against `vendor/jvjvjv/code-talker/config/code-talker.php`
 and copy over only the new keys.
 
+### Migrating between versions
+
+Every release's full details live in [`CHANGELOG.md`](CHANGELOG.md); this table
+is the fast path — what you actually have to *do* to move to a given version,
+skipping straight to it if you're jumping several releases at once. Apply every
+row from your current version up to your target, in order.
+
+| Version | Action required |
+| ------- | ---------------- |
+| **0.14.0** | **Breaking.** `AiChatBot` → `AiPersona` throughout.<br>• Re-publish and run migrations (renames `ai_chat_bots`/`ai_chat_bot_id`, adds `ai_operators`/`ai_operator_id`).<br>• Update code referencing `AiChatBot`, `AiChatBotManager`, `AiChatBotConversationService` to the `AiPersona*` names (same shapes/constructors).<br>• Update stored `prompt_template` placeholders: `{{bot_name}}`/`{{bot_slug}}`/`{{bot_description}}` → `{{persona_name}}`/`{{persona_slug}}`/`{{persona_description}}`.<br>• Update any `feature_keys` config entries from `chat-bot:*` to `persona:*` (stored `AiSystemFeatureDefault` rows are migrated automatically; your config array is not).<br>• Rename a host-provided `AiChatBotFactory` to `AiPersonaFactory`. |
+| **0.13.0** | None — `composer update` only. Optionally re-publish `code-talker-types`/`code-talker-client` to get `onPageReload`/`onToolProgress`. |
+| **0.12.1** | None — `composer update` only. |
+| **0.12.0** | **Breaking** if you call `http-request` with a `headers` object. Change it to a line-based string: `"Name: value"`, one per line. Everything else in this release is additive. |
+| **0.11.0** | **Breaking, large.** Read the full entry before upgrading.<br>• All package routes/controllers are gone — build your own endpoint against `AiChatBotConversationService` (now `AiPersonaConversationService` as of 0.14.0) and `Services/Management/`.<br>• Re-publish and run migrations (`..._add_message_structure_to_ai_conversation_messages_table`).<br>• Replace session/cookie conversation resolution with `AiConversation::findByChatHashOrUuid()`.<br>• Supply `usingCancellationCheck()` for any turn driven outside an HTTP request.<br>• If you render the chat pages, install and configure Inertia yourself — the package's `inertia` config block and dependency are gone.<br>• `fetch-web-page` now refuses private/loopback hosts by default; add `request_policy.allow_private_hosts` where you relied on reaching internal services. |
+| **0.10.0** | **Breaking only if you subclass `ChatBotController`.** Its constructor signature and several `protected` helpers changed/were removed. Prefer binding a replacement collaborator under `Services/ChatBot/` over subclassing. |
+| **0.9.2** | None — `composer update` only. |
+| **0.9.1** | None — `composer update` only. |
+| **0.9.0** | None required. Optional: switch any error-text pattern-matching to the new `reason` code (`max_stream_duration`/`provider_error`). |
+| **0.8.0** | None — `composer update` only. |
+| **0.7.1** | Not breaking, but check your web server's request-header buffer size (e.g. nginx `large_client_header_buffers 8 32k;`) so browsers with the old bloated per-bot cookies can reach the app long enough to have them cleared. |
+| **0.7.0** | **Breaking.** Memory extraction timing changed — it now fires once, up to ~45 minutes after a conversation goes idle, not after every message.<br>• Re-publish config for the new `conversations.idle_timeout_minutes` key.<br>• If you disabled the package scheduler (`'schedule' => false`), register `ai:complete-idle-conversations` yourself or memory extraction will never run. |
+| **0.6.0** | **Breaking.** Requires PHP `^8.3` and Laravel `^12.62 \|\| ^13.15`.<br>• Replace `AiClientContract`/`ClaudeService`/etc. usage with `AgentFactory::forSystem()`/`forFeature()`.<br>• Remove the retired `anthropic-ai/sdk`, `openai-php/client`, `google-gemini-php/client` dependencies if referenced directly.<br>• If you parse `AiLlmMessage` rows, note tool-use iterations no longer log as separate request/response rows. |
+| **0.5.0** | **Breaking.** Tools are now `laravel/mcp` `Tool` classes (`AiToolHandlerContract` still works for one release).<br>• Run the published migration remapping `AiSystem::allowed_tools` from snake_case to kebab-case tool names.<br>• `composer update` pulls in the new `laravel/mcp` dependency automatically. |
+| **0.4.1** | None — `composer update` only. |
+| **0.4.0** | None — `composer update` only. |
+| **0.3.0** | None — `composer update` only. |
+| **0.2.4** | None — `composer update` only. |
+| **0.2.3** | None required. Optional: `php artisan vendor:publish --tag=code-talker-routes` if you want to customize the route files. |
+| **0.2.2** | If you relied on the default system prompt seed to create `TargetedResumeService`-specific prompts, create those manually or via your own migration — the seed no longer includes them. |
+| **0.2.1** | None generally. Affects only hosts that had worked around the prior hardcoded-UUID migration bug themselves. |
+| **0.2.0** | **Breaking.** Package-managed chat-bot visibility/roles are removed (`is_public`, `allowed_roles`).<br>• Run the migration dropping `ai_chat_bots.is_public`.<br>• Move all bot/admin access decisions into your own middleware, gates, or policies. |
+| **0.1.2** | None — `composer update` only. |
+| **0.1.1** | None — `composer update` only. |
+| **0.1.0** | Initial release. |
+
 ## Configuration
 
 `config/code-talker.php` controls package-wide behavior:
@@ -54,7 +89,7 @@ and copy over only the new keys.
 | Key                                  | Default                                  | Description                                                      |
 | ------------------------------------ | ---------------------------------------- | ---------------------------------------------------------------- |
 | `user_model`                         | `App\Models\User::class`                 | Eloquent model used for authenticated users                      |
-| `reserved_slugs`                     | `[]`                                     | Additional slugs that cannot be used for root-path chatbots      |
+| `reserved_slugs`                     | `[]`                                     | Additional slugs that cannot be used for root-path personas      |
 | `feature_keys`                       | `[]`                                     | Valid feature keys for system defaults; empty accepts any string |
 | `schedule`                           | `true`                                   | Set to `false` to disable the package's automatic scheduled jobs |
 | `conversations.idle_timeout_minutes` | `30`                                     | Inactivity before a conversation is marked `Completed`           |
@@ -141,7 +176,7 @@ An `AiSystem` record represents a fully configured provider endpoint. Create one
 | `model`            | Provider-specific model name                                                      |
 | `api_key`          | Stored encrypted                                                                  |
 | `max_tokens`       | Maximum output tokens per request                                                 |
-| `temperature`      | Sampling temperature (overrides bot-level default)                                |
+| `temperature`      | Sampling temperature (overrides persona-level default)                            |
 | `context_length`   | Context window for local models (LM Studio)                                       |
 | `enable_thinking`  | Enable extended thinking / reasoning output (Anthropic)                           |
 | `allowed_tools`    | Array of tool names the model may invoke                                          |
@@ -199,13 +234,13 @@ $agent = $factory->forSystem($system)->continue((string) $conversation->id, $use
 
 Conversations must already exist. `storeConversation()` throws, because a Code
 Talker conversation requires an `AiSystem` that the contract gives no way to
-supply — open one with `AiChatBotConversationService::startConversation()` first.
+supply — open one with `AiPersonaConversationService::startConversation()` first.
 
 ### Two writers
 
 `continue()` attaches a conversation participant, which arms laravel/ai's
 remembering middleware. That middleware persists both messages of a turn. If you
-*also* drive `AiChatBotConversationService`, every turn is written twice.
+*also* drive `AiPersonaConversationService`, every turn is written twice.
 
 The package's own chat flow avoids this by resuming without a participant:
 
@@ -224,9 +259,11 @@ If you use `continue()` directly, also set `ai.conversations.generate_title` to
 `false` unless you want a second provider call per new conversation for a title
 the package already derives locally.
 
-## Chat Bots
+## Personas
 
-An `AiChatBot` defines a user-facing persona. Create one with `AiChatBotManager`. Key fields:
+An `AiPersona` defines a user-facing, turn-driven character — one that responds
+when a human sends it a message. (For AI work dispatched independently of a
+human message, see [Operators](#operators).) Create one with `AiPersonaManager`. Key fields:
 
 | Field                      | Description                                          |
 | -------------------------- | ---------------------------------------------------- |
@@ -236,11 +273,11 @@ An `AiChatBot` defines a user-facing persona. Create one with `AiChatBotManager`
 | `access_path`              | `chat` → `/chat/{slug}`, `root` → `/{slug}`          |
 | `prompt_template`          | System prompt with optional placeholders (see below) |
 | `require_visitor_identity` | Prompt anonymous visitors for name and email         |
-| `tools_enabled`            | Whether the bot may invoke registered tools          |
-| `temperature`              | Overrides `AiSystem` temperature for this bot        |
+| `tools_enabled`            | Whether the persona may invoke registered tools      |
+| `temperature`              | Overrides `AiSystem` temperature for this persona    |
 
-Chatbot authentication and authorization are not managed by this package. The
-consuming application must decide which users or guests can reach chatbot
+Persona authentication and authorization are not managed by this package. The
+consuming application must decide which users or guests can reach persona
 routes by applying its own middleware, gates, or policies around the package
 routes.
 
@@ -248,11 +285,11 @@ routes.
 
 These tokens are replaced when a conversation starts:
 
-| Placeholder           | Value                                           |
-| --------------------- | ----------------------------------------------- |
-| `{{bot_name}}`        | Bot's display name                              |
-| `{{bot_slug}}`        | Bot's slug                                      |
-| `{{bot_description}}` | Bot's description field                         |
+| Placeholder                | Value                                           |
+| --------------------------- | ----------------------------------------------- |
+| `{{persona_name}}`        | Persona's display name                          |
+| `{{persona_slug}}`        | Persona's slug                                  |
+| `{{persona_description}}` | Persona's description field                     |
 | `{{visitor_name}}`    | Name collected from anonymous visitor (if any)  |
 | `{{visitor_email}}`   | Email collected from anonymous visitor (if any) |
 
@@ -264,16 +301,16 @@ The package registers no routes and renders no pages. You write the endpoint;
 the package supplies the turn.
 
 ```php
-use Jvjvjv\CodeTalker\Services\AiChatBotConversationService;
+use Jvjvjv\CodeTalker\Services\AiPersonaConversationService;
 use Jvjvjv\CodeTalker\Services\ChatBot\SseFrameEncoder;
 
-public function message(Request $request, AiChatBot $bot,
-    AiChatBotConversationService $chat, SseFrameEncoder $encoder)
+public function message(Request $request, AiPersona $persona,
+    AiPersonaConversationService $chat, SseFrameEncoder $encoder)
 {
     $validated = $request->validate(['message' => ['required', 'string']]);
 
-    $conversation = $this->resolveConversation($request, $bot)
-        ?? $chat->startConversation($bot, $request->user());
+    $conversation = $this->resolveConversation($request, $persona)
+        ?? $chat->startConversation($persona, $request->user());
 
     return response()->stream(function () use ($chat, $conversation, $validated, $encoder) {
         // PHP only reports a dead connection once output has been flushed to
@@ -361,9 +398,9 @@ and `$conversation->chat_hash` is a stable shareable handle that
 `ChatBotPresenter` keeps the queries a chat UI needs:
 
 ```php
-$presenter->transcript($conversation);            // visible messages, system prompt excluded
-$presenter->totalCostUsd($bot);                   // lifetime cost for a bot
-$presenter->conversationsFor($user, $bots);       // an authenticated user's conversations
+$presenter->transcript($conversation);              // visible messages, system prompt excluded
+$presenter->totalCostUsd($persona);                 // lifetime cost for a persona
+$presenter->conversationsFor($user, $personas);     // an authenticated user's conversations
 ```
 
 Readiness and warm-up are unchanged and were always transport-free:
@@ -385,6 +422,66 @@ The client POSTs a message and parses the encoded stream into typed callbacks
 (`onText`, `onReasoning`, `onDone`, `onError`, …) with an abort handle. It works
 against any endpoint that emits the framing above.
 
+## Operators
+
+An `AiOperator` is a persona-shaped config for bounded, single-shot AI work that
+isn't triggered by a human sending a message — a host observer reacting to a
+domain event, a scheduled sweep, anything that isn't a chat turn. Create one
+with `AiOperatorManager`. Key fields:
+
+| Field              | Description                                                    |
+| ------------------ | ---------------------------------------------------------------|
+| `ai_system_id`     | The backing `AiSystem`                                         |
+| `name`             | Display name                                                   |
+| `slug`             | URL-safe identifier, must be unique                             |
+| `prompt_template`  | Prompt with `{{dotted.path}}` placeholders (see below)         |
+| `allowed_tools`    | Tool names this operator may invoke (falls back to the `AiSystem`'s `allowed_tools` when null) |
+| `is_active`        | Whether the operator can be dispatched                         |
+
+**The package owns no trigger, event bus, or scheduling system for operators.**
+Dispatching one is a single job, the same shape the package already uses
+internally for post-conversation memory extraction:
+
+```php
+use Jvjvjv\CodeTalker\Jobs\RunAiOperatorJob;
+
+// From anywhere that knows when this should run — an Eloquent observer, an
+// event listener, a console command, your own scheduled job:
+dispatch(new RunAiOperatorJob($operator, [
+    'order' => $order->toArray(),
+]));
+```
+
+A run is bounded: one interpolated prompt, laravel/ai's agentic tool loop
+(the same step cap a chat turn uses), then done. There is no "keep going
+until some goal is met" loop — an operator that stops on anything other than
+a clean finish (e.g. the token limit) fails the job rather than continuing
+silently, so it surfaces through your queue's normal failure handling.
+
+### Prompt template placeholders
+
+Unlike a persona's fixed placeholder set, an operator's placeholders are
+arbitrary and resolve against whatever `$context` array the dispatching code
+passed in, via dotted paths:
+
+```php
+// prompt_template: "A new order was placed: {{order.total}} for {{order.customer.email}}."
+dispatch(new RunAiOperatorJob($operator, [
+    'order' => ['total' => 42, 'customer' => ['email' => 'a@example.com']],
+]));
+```
+
+A placeholder with no matching value in `$context` fails the run before any
+provider call is made — a task prompt with a silently-blanked field is worse
+than a loud failure.
+
+### Audit trail and cost tracking
+
+An operator run is recorded as an `AiConversation` (`feature` =
+`operator:{slug}`, `ai_operator_id` set, `ai_persona_id` null), so it gets
+`AiLlmMessage` request/response logging, raw exchange capture, and
+`ConversationUsageService` cost rollups exactly the way a persona's turns do —
+there is no operator-specific logging path.
 
 ## Tool Registration
 
@@ -451,7 +548,7 @@ public function register(): void
 ```
 
 Tools are auto-discovered from registered directories. The `AiSystem::allowed_tools`
-array controls which discovered tools are exposed to the model for a given bot, by
+array controls which discovered tools are exposed to the model for a given system, by
 tool name.
 
 ### Signaling a page reload
@@ -603,7 +700,7 @@ rather than resolving the host a second time.
 > **A declared policy is a guardrail, not a boundary.** It records intent in the
 > `AiLlmMessage` log and keeps requests from reaching internal services by accident, but
 > the caller declaring it is the model itself. **Keep these tools out of `allowed_tools`
-> for any bot that takes untrusted input**, and restrict outbound network access from
+> for any persona or operator that takes untrusted input**, and restrict outbound network access from
 > the PHP process rather than relying on the tool to police itself.
 
 **The model does not supply credentials by default.** `Authorization`, `Cookie`,
@@ -676,7 +773,7 @@ has no effect — `Authorization`/`Cookie` are stripped exactly as before. `fetc
 has no `headers` input at all, so this only applies to `http-request`.
 
 **The external MCP server has no `AiSystem` at all.** A call from Claude Desktop or any
-other MCP client resolves `ToolContext::forUser()` — no conversation, no `AiChatBot`, no
+other MCP client resolves `ToolContext::forUser()` — no conversation, no `AiPersona`, no
 `AiSystem`, so no `web_tool_policy` to consult. Without a fallback, `allow_credential_headers`
 would be permanently unreachable over that transport regardless of what an operator
 configures. `ToolContext::webToolPolicy()` falls back to a global config in exactly
@@ -791,14 +888,14 @@ Memories are stored in `AiFeatureMemory` and scoped per user:
 | ------------------ | ------------------------------------------------- |
 | `preference`       | How the user likes things done                    |
 | `domain_knowledge` | Facts about the user not covered by other data    |
-| `system_tuning`    | What worked well or poorly in this bot's approach |
+| `system_tuning`    | What worked well or poorly in this persona's or operator's approach |
 
 Memories are ranked by `confidence` and `times_reinforced` and injected into the system prompt under `## Learned Insights`. Memories can be reviewed and edited through `AiMemoryManager` (see **Management Services**).
 
 To rebuild all memories for a feature from historical conversations:
 
 ```bash
-app(\Jvjvjv\CodeTalker\Services\AiMemoryService::class)->rebuildMemories('chat-bot:my-bot');
+app(\Jvjvjv\CodeTalker\Services\AiMemoryService::class)->rebuildMemories('persona:my-persona');
 ```
 
 ## Management Services
@@ -811,7 +908,8 @@ or tests, under `Jvjvjv\CodeTalker\Services\Management`.
 | ----------------------- | ------------------------------------------------------------------------------------------- |
 | `AiSystemManager`       | Create/update/delete/duplicate systems, sync feature defaults, list provider models          |
 | `AiSystemPromptManager` | Reusable system prompt CRUD, clearing references on delete                                   |
-| `AiChatBotManager`      | Chat bot CRUD, per-bot usage rollups, available systems, available tools                     |
+| `AiPersonaManager`      | Persona CRUD, per-persona usage rollups, available systems, available tools                  |
+| `AiOperatorManager`     | Operator CRUD, per-operator run/usage rollups, available tools                               |
 | `AiConversationManager` | Filter and search conversations, inspect one, queue usage backfill                           |
 | `AiMemoryManager`       | Memory CRUD, triage-ordered listing, per-feature rebuild                                     |
 

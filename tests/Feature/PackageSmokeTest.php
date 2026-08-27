@@ -5,7 +5,7 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Route;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
-use Jvjvjv\CodeTalker\Services\Management\AiChatBotManager;
+use Jvjvjv\CodeTalker\Services\Management\AiPersonaManager;
 use Jvjvjv\CodeTalker\Services\Management\AiConversationManager;
 use Jvjvjv\CodeTalker\Services\Management\AiMemoryManager;
 use Jvjvjv\CodeTalker\Services\Management\AiSystemManager;
@@ -58,7 +58,7 @@ class PackageSmokeTest extends TestCase
         foreach ([
             AiSystemManager::class,
             AiSystemPromptManager::class,
-            AiChatBotManager::class,
+            AiPersonaManager::class,
             AiConversationManager::class,
             AiMemoryManager::class,
         ] as $manager) {

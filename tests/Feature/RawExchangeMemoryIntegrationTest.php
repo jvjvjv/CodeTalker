@@ -56,7 +56,7 @@ class RawExchangeMemoryIntegrationTest extends TestCase
 
         $conversation = AiConversation::create([
             'ai_system_id' => $system->id,
-            'feature' => 'chat-bot:local',
+            'feature' => 'persona:local',
             'status' => 'active',
         ]);
 

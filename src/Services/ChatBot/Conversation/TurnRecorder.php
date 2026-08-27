@@ -73,7 +73,7 @@ class TurnRecorder
         $log = [
             'ai_system_id' => $conversation->aiSystem->id,
             'ai_conversation_id' => $conversation->id,
-            'ai_chat_bot_id' => $conversation->ai_chat_bot_id,
+            'ai_persona_id' => $conversation->ai_persona_id,
             'user_id' => $conversation->user_id,
             'feature' => $conversation->feature,
             'input_tokens' => $inputTokens ?: null,
@@ -119,7 +119,7 @@ class TurnRecorder
         AiInteractionLog::create([
             'ai_system_id' => $conversation->aiSystem->id,
             'ai_conversation_id' => $conversation->id,
-            'ai_chat_bot_id' => $conversation->ai_chat_bot_id,
+            'ai_persona_id' => $conversation->ai_persona_id,
             'user_id' => $conversation->user_id,
             'feature' => $conversation->feature,
             'model' => $conversation->aiSystem->model,

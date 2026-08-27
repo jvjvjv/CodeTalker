@@ -8,12 +8,12 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\CodeTalkerServiceProvider;
 use Jvjvjv\CodeTalker\Jobs\ProcessAiMemoryJob;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 use Jvjvjv\CodeTalker\Models\AiInteractionLog;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Models\AiSystem;
-use Jvjvjv\CodeTalker\Services\AiChatBotConversationService;
+use Jvjvjv\CodeTalker\Services\AiPersonaConversationService;
 use Jvjvjv\CodeTalker\Services\ChatBot\SseFrameEncoder;
 use Jvjvjv\CodeTalker\Services\AiMemoryService;
 use Jvjvjv\CodeTalker\Services\ConversationUsageService;
@@ -39,7 +39,7 @@ use Laravel\Ai\Streaming\Events\ReasoningDelta;
 use Laravel\Ai\Streaming\Events\StreamStart;
 use RuntimeException;
 
-class AiChatBotConversationServiceTest extends TestCase
+class AiPersonaConversationServiceTest extends TestCase
 {
     use RefreshDatabase;
 
@@ -93,7 +93,7 @@ class AiChatBotConversationServiceTest extends TestCase
         $property->setValue(null, $directories);
     }
 
-    private function makeBot(array $systemAttributes = [], array $botAttributes = []): AiChatBot
+    private function makePersona(array $systemAttributes = [], array $personaAttributes = []): AiPersona
     {
         $system = AiSystem::create(array_merge([
             'name' => 'Test System',
@@ -104,13 +104,13 @@ class AiChatBotConversationServiceTest extends TestCase
             'is_active' => true,
         ], $systemAttributes));
 
-        return AiChatBot::create(array_merge([
+        return AiPersona::create(array_merge([
             'ai_system_id' => $system->id,
             'name' => 'Test Bot',
             'slug' => 'test-bot',
-            'prompt_template' => 'You are {{bot_name}}.',
+            'prompt_template' => 'You are {{persona_name}}.',
             'is_active' => true,
-        ], $botAttributes));
+        ], $personaAttributes));
     }
 
     /**
@@ -145,9 +145,9 @@ class AiChatBotConversationServiceTest extends TestCase
         Queue::fake();
         CodeTalkerAgent::fake(['Hello world from fake']);
 
-        $bot = $this->makeBot();
-        $service = $this->app->make(AiChatBotConversationService::class);
-        $conversation = $service->startConversation($bot);
+        $persona = $this->makePersona();
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
 
         $rawLines = [];
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi there'), $rawLines);
@@ -211,9 +211,9 @@ class AiChatBotConversationServiceTest extends TestCase
         Queue::fake();
         CodeTalkerAgent::fake(['Hello world from fake']);
 
-        $bot = $this->makeBot();
-        $service = $this->app->make(AiChatBotConversationService::class);
-        $conversation = $service->startConversation($bot);
+        $persona = $this->makePersona();
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
 
         $rawLines = [];
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi there'), $rawLines);
@@ -261,11 +261,11 @@ class AiChatBotConversationServiceTest extends TestCase
 
         // A turn that completes normally.
         CodeTalkerAgent::fake(['All done']);
-        $bot = $this->makeBot();
-        $service = $this->app->make(AiChatBotConversationService::class);
+        $persona = $this->makePersona();
+        $service = $this->app->make(AiPersonaConversationService::class);
 
         $rawLines = [];
-        $this->drainAndDecode($service->continueConversation($service->startConversation($bot), 'Hi'), $rawLines);
+        $this->drainAndDecode($service->continueConversation($service->startConversation($persona), 'Hi'), $rawLines);
 
         $this->assertSame("data: [DONE]\n\n", end($rawLines));
 
@@ -279,7 +279,7 @@ class AiChatBotConversationServiceTest extends TestCase
             $this->app->make(ConversationUsageService::class),
             $this->app->make(RawExchangeContext::class),
             $this->app->make(AiSystemProviderConfigurator::class),
-        ) extends AiChatBotConversationService {
+        ) extends AiPersonaConversationService {
             protected function streamElapsedSeconds(float $startedAt): float
             {
                 return 9999.0;
@@ -288,7 +288,7 @@ class AiChatBotConversationServiceTest extends TestCase
 
         $rawLines = [];
         $events = $this->drainAndDecode(
-            $timingOut->continueConversation($timingOut->startConversation($this->makeBot([], ['slug' => 'timeout-bot'])), 'Hi'),
+            $timingOut->continueConversation($timingOut->startConversation($this->makePersona([], ['slug' => 'timeout-bot'])), 'Hi'),
             $rawLines,
         );
 
@@ -296,7 +296,7 @@ class AiChatBotConversationServiceTest extends TestCase
         $this->assertStringNotContainsString('[DONE]', end($rawLines));
 
         // A turn that fails on the provider.
-        $failing = $this->makeBot([], ['slug' => 'broken-bot']);
+        $failing = $this->makePersona([], ['slug' => 'broken-bot']);
         $failing->aiSystem->forceFill(['provider' => 'not-a-real-provider'])->save();
 
         $rawLines = [];
@@ -325,13 +325,13 @@ class AiChatBotConversationServiceTest extends TestCase
             'Summary after reading the page',
         ]);
 
-        $bot = $this->makeBot(
+        $persona = $this->makePersona(
             ['allowed_tools' => ['fetch-web-page']],
             ['tools_enabled' => true],
         );
 
-        $service = $this->app->make(AiChatBotConversationService::class);
-        $conversation = $service->startConversation($bot);
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
 
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Read the page'));
 
@@ -390,13 +390,13 @@ class AiChatBotConversationServiceTest extends TestCase
             'Summary after reading the page',
         ]);
 
-        $bot = $this->makeBot(
+        $persona = $this->makePersona(
             ['allowed_tools' => ['fetch-web-page']],
             ['tools_enabled' => true],
         );
 
-        $service = $this->app->make(AiChatBotConversationService::class)->usingToolPayloads();
-        $conversation = $service->startConversation($bot);
+        $service = $this->app->make(AiPersonaConversationService::class)->usingToolPayloads();
+        $conversation = $service->startConversation($persona);
 
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Read the page'));
 
@@ -425,13 +425,13 @@ class AiChatBotConversationServiceTest extends TestCase
             'Done, the page will reload.',
         ]);
 
-        $bot = $this->makeBot(
+        $persona = $this->makePersona(
             ['allowed_tools' => ['page-reloading-test-tool']],
             ['tools_enabled' => true],
         );
 
-        $service = $this->app->make(AiChatBotConversationService::class);
-        $conversation = $service->startConversation($bot);
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
 
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Do the thing'));
 
@@ -456,13 +456,13 @@ class AiChatBotConversationServiceTest extends TestCase
             'Summary after reading the page',
         ]);
 
-        $bot = $this->makeBot(
+        $persona = $this->makePersona(
             ['allowed_tools' => ['fetch-web-page']],
             ['tools_enabled' => true],
         );
 
-        $service = $this->app->make(AiChatBotConversationService::class);
-        $conversation = $service->startConversation($bot);
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
 
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Read the page'));
 
@@ -476,7 +476,7 @@ class AiChatBotConversationServiceTest extends TestCase
 
         config()->set('code-talker.conversations.max_stream_seconds', 60);
 
-        $bot = $this->makeBot();
+        $persona = $this->makePersona();
 
         // Override the elapsed-time source so the wall-clock guard trips
         // deterministically (on the very first checked event), without
@@ -487,14 +487,14 @@ class AiChatBotConversationServiceTest extends TestCase
             $this->app->make(ConversationUsageService::class),
             $this->app->make(RawExchangeContext::class),
             $this->app->make(AiSystemProviderConfigurator::class),
-        ) extends AiChatBotConversationService {
+        ) extends AiPersonaConversationService {
             protected function streamElapsedSeconds(float $startedAt): float
             {
                 return 9999.0;
             }
         };
 
-        $conversation = $service->startConversation($bot);
+        $conversation = $service->startConversation($persona);
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi'));
 
         $error = collect($events)->firstWhere('type', 'error');
@@ -561,7 +561,7 @@ class AiChatBotConversationServiceTest extends TestCase
             $this->fakeAgentGateways[CodeTalkerAgent::class] = $stuckReasoning;
         }, $manager, $manager::class))();
 
-        $bot = $this->makeBot();
+        $persona = $this->makePersona();
 
         // Trip the guard only after a few reasoning deltas have streamed, so
         // there is real partial content to preserve.
@@ -571,7 +571,7 @@ class AiChatBotConversationServiceTest extends TestCase
             $this->app->make(ConversationUsageService::class),
             $this->app->make(RawExchangeContext::class),
             $this->app->make(AiSystemProviderConfigurator::class),
-        ) extends AiChatBotConversationService {
+        ) extends AiPersonaConversationService {
             private int $calls = 0;
 
             protected function streamElapsedSeconds(float $startedAt): float
@@ -580,7 +580,7 @@ class AiChatBotConversationServiceTest extends TestCase
             }
         };
 
-        $conversation = $service->startConversation($bot);
+        $conversation = $service->startConversation($persona);
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi'));
 
         $error = collect($events)->firstWhere('type', 'error');
@@ -616,7 +616,7 @@ class AiChatBotConversationServiceTest extends TestCase
             'Summary after reading the page',
         ]);
 
-        $bot = $this->makeBot(
+        $persona = $this->makePersona(
             ['allowed_tools' => ['fetch-web-page']],
             ['tools_enabled' => true],
         );
@@ -627,7 +627,7 @@ class AiChatBotConversationServiceTest extends TestCase
             $this->app->make(ConversationUsageService::class),
             $this->app->make(RawExchangeContext::class),
             $this->app->make(AiSystemProviderConfigurator::class),
-        ) extends AiChatBotConversationService {
+        ) extends AiPersonaConversationService {
             /** @var array<int, float> */
             public array $seenStartedAt = [];
 
@@ -639,7 +639,7 @@ class AiChatBotConversationServiceTest extends TestCase
             }
         };
 
-        $conversation = $service->startConversation($bot);
+        $conversation = $service->startConversation($persona);
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Read the page'));
 
         // No error: the guard never saw a full-turn-cumulative duration —
@@ -658,7 +658,7 @@ class AiChatBotConversationServiceTest extends TestCase
         Queue::fake();
         CodeTalkerAgent::fake(['This turn is cancelled by the browser mid-stream']);
 
-        $bot = $this->makeBot();
+        $persona = $this->makePersona();
 
         // Simulate the browser hanging up (Cancel button / ESC): the abort guard
         // trips after the first stream event so a partial response is captured.
@@ -668,7 +668,7 @@ class AiChatBotConversationServiceTest extends TestCase
             $this->app->make(ConversationUsageService::class),
             $this->app->make(RawExchangeContext::class),
             $this->app->make(AiSystemProviderConfigurator::class),
-        ) extends AiChatBotConversationService {
+        ) extends AiPersonaConversationService {
             private int $checks = 0;
 
             protected function clientAborted(): bool
@@ -677,7 +677,7 @@ class AiChatBotConversationServiceTest extends TestCase
             }
         };
 
-        $conversation = $service->startConversation($bot);
+        $conversation = $service->startConversation($persona);
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi'));
 
         // A client abort is a clean stop, not a failure: no error event is emitted.
@@ -701,9 +701,9 @@ class AiChatBotConversationServiceTest extends TestCase
     {
         Queue::fake();
 
-        $bot = $this->makeBot();
-        $service = $this->app->make(AiChatBotConversationService::class);
-        $conversation = $service->startConversation($bot);
+        $persona = $this->makePersona();
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
 
         // Enable faked mode, then swap in a gateway that emits a non-recoverable
         // error event mid-stream — mirroring LM Studio returning HTTP 200 with an
@@ -758,11 +758,11 @@ class AiChatBotConversationServiceTest extends TestCase
     {
         Queue::fake();
 
-        $bot = $this->makeBot(['provider' => 'anthropic']);
-        $bot->aiSystem->forceFill(['provider' => 'not-a-real-provider'])->save();
+        $persona = $this->makePersona(['provider' => 'anthropic']);
+        $persona->aiSystem->forceFill(['provider' => 'not-a-real-provider'])->save();
 
-        $service = $this->app->make(AiChatBotConversationService::class);
-        $conversation = $service->startConversation($bot);
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
 
         $rawLines = [];
         $events = $this->drainAndDecode($service->continueConversation($conversation->fresh(), 'Hi'), $rawLines);

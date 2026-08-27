@@ -26,7 +26,8 @@ class AiConversation extends Model
         'chat_hash',
         'user_id',
         'ai_system_id',
-        'ai_chat_bot_id',
+        'ai_persona_id',
+        'ai_operator_id',
         'feature',
         'title',
         'visitor_name',
@@ -77,9 +78,14 @@ class AiConversation extends Model
         return $this->belongsTo(AiSystem::class);
     }
 
-    public function aiChatBot(): BelongsTo
+    public function aiPersona(): BelongsTo
     {
-        return $this->belongsTo(AiChatBot::class);
+        return $this->belongsTo(AiPersona::class);
+    }
+
+    public function aiOperator(): BelongsTo
+    {
+        return $this->belongsTo(AiOperator::class);
     }
 
     public function messages(): HasMany

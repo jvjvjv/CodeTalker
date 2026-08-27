@@ -222,24 +222,24 @@ class AiSystemManager
     }
 
     /**
-     * Soft-delete a system, deactivating any chat bots that reference it.
+     * Soft-delete a system, deactivating any personas that reference it.
      *
-     * The bots are deactivated rather than deleted so the relationship — and
-     * whatever conversation history hangs off it — survives.
+     * The personas are deactivated rather than deleted so the relationship —
+     * and whatever conversation history hangs off it — survives.
      *
-     * @return int the number of chat bots deactivated
+     * @return int the number of personas deactivated
      */
     public function delete(AiSystem $system): int
     {
-        $botCount = $system->chatBots()->count();
+        $personaCount = $system->personas()->count();
 
-        if ($botCount > 0) {
-            $system->chatBots()->update(['is_active' => false]);
+        if ($personaCount > 0) {
+            $system->personas()->update(['is_active' => false]);
         }
 
         $system->delete();
 
-        return $botCount;
+        return $personaCount;
     }
 
     /**
@@ -251,6 +251,7 @@ class AiSystemManager
     {
         $clone = $system->replicate(['id']);
         $clone->name = $system->name . ' (copy)';
+        $clone->duplicated_at = now();
         $clone->save();
 
         if ($copyFeatureDefaults) {

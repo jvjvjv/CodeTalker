@@ -4,7 +4,7 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
-use Jvjvjv\CodeTalker\Models\AiChatBot;
+use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 use Jvjvjv\CodeTalker\Models\AiSystem;
@@ -55,18 +55,18 @@ class CodeTalkerConversationStoreTest extends TestCase
         ]);
 
         // Slugs are unique, and some tests need more than one conversation.
-        $bot = AiChatBot::create([
+        $persona = AiPersona::create([
             'ai_system_id' => $system->id,
             'name' => 'Test Bot',
             'slug' => 'test-bot-' . ++$this->botCount,
-            'prompt_template' => 'You are {{bot_name}}.',
+            'prompt_template' => 'You are {{persona_name}}.',
             'is_active' => true,
         ]);
 
         return AiConversation::create([
             'ai_system_id' => $system->id,
-            'ai_chat_bot_id' => $bot->id,
-            'feature' => 'chat-bot:test-bot',
+            'ai_persona_id' => $persona->id,
+            'feature' => 'persona:test-bot',
         ]);
     }
 

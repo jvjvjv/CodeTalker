@@ -12,6 +12,8 @@ class AiSystem extends Model
 {
     use HasFactory, SoftDeletes;
 
+    // duplicated_at is deliberately excluded from $fillable — it must only be
+    // set by AiSystemManager::duplicate(), never accepted from a request.
     protected $fillable = [
         'name',
         'provider',
@@ -63,6 +65,7 @@ class AiSystem extends Model
             'temperature' => 'decimal:2',
             'max_tokens' => 'integer',
             'context_length' => 'integer',
+            'duplicated_at' => 'datetime',
         ];
     }
 
@@ -93,9 +96,14 @@ class AiSystem extends Model
         return $this->hasMany(AiConversation::class);
     }
 
-    public function chatBots(): HasMany
+    public function personas(): HasMany
     {
-        return $this->hasMany(AiChatBot::class);
+        return $this->hasMany(AiPersona::class);
+    }
+
+    public function operators(): HasMany
+    {
+        return $this->hasMany(AiOperator::class);
     }
 
     public function interactionLogs(): HasMany

@@ -9,7 +9,7 @@ use Closure;
  * single provider request running past its wall-clock budget.
  *
  * Both are supplied as closures rather than called directly, because
- * AiChatBotConversationService exposes them as overridable hooks so tests can
+ * AiPersonaConversationService exposes them as overridable hooks so tests can
  * drive them deterministically — the override has to be what the loop consults.
  */
 final class TurnGuards

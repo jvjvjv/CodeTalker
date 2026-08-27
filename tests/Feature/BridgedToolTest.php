@@ -16,7 +16,7 @@ class BridgedToolTest extends TestCase
 {
     private function registry(array $allowedTools): ChatBotToolRegistry
     {
-        $conversation = new AiConversation(['feature' => 'chat-bot:test']);
+        $conversation = new AiConversation(['feature' => 'persona:test']);
 
         return new ChatBotToolRegistry($conversation, $allowedTools);
     }
