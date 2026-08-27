@@ -70,7 +70,7 @@ Without this guard, saving an LM Studio record with `role = audio` succeeds and 
 
 Rather than copy ten lines twice, extract `Services\AiSystemResolver` with `forFeature(string $feature, AiSystemRole $expected): AiSystem`. `AgentFactory::systemForFeature()` **keeps its public signature and return type** and delegates, passing `AiSystemRole::Chat`. It is public API — `forFeature()` is documented in the README — so it must not change shape.
 
-This closes a real gap: today, mapping `chat-bot:support` to a record and later switching that record's provider gives no role protection at all. After this change, pointing a chat feature at an audio record fails loudly at resolution.
+This closes a real gap: today, mapping `persona:support` to a record and later switching that record's provider gives no role protection at all. After this change, pointing a chat feature at an audio record fails loudly at resolution.
 
 ## Decision 5 — capture raw exchanges, log nothing else
 
