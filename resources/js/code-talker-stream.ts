@@ -47,6 +47,16 @@ export interface ChatTurnCallbacks {
     onText?: (delta: string) => void;
     /** Append to the reasoning trace. */
     onReasoning?: (delta: string) => void;
+    /** The agent is calling a tool. */
+    onToolProgress?: (event: {
+        text: string;
+        tools: string[];
+        input?: unknown;
+        output?: unknown;
+        successful?: boolean;
+    }) => void;
+    /** A tool changed server state; the page should reload. */
+    onPageReload?: () => void;
     /** The turn finished normally. */
     onDone?: (summary: ChatTurnSummary) => void;
     /**
@@ -259,6 +269,22 @@ function dispatch(frame: string, callbacks: ChatTurnCallbacks): boolean {
             return false;
 
         case 'message_stop':
+            return false;
+
+        case 'tool_use_progress':
+            callbacks.onToolProgress?.({
+                text: event.text,
+                tools: event.tools,
+                input: event.input,
+                output: event.output,
+                successful: event.successful,
+            });
+
+            return false;
+
+        case 'page_reload':
+            callbacks.onPageReload?.();
+
             return false;
 
         case 'error':

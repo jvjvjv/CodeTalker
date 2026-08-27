@@ -9,9 +9,10 @@ Because these are missing, a host that wants either one cannot use `Conversation
 
 ## What Changes
 
-- `ConversationTurnRunner` emits a `tool_use_progress` frame when it encounters a `ToolCallEvent`. It already collects these into `$toolCalls` at exactly the right point — the frame is not currently yielded.
+**Already shipped** (0.12.0, before this change was picked up): `ConversationTurnRunner` emits a `tool_use_progress` frame on each `ToolCallEvent`, and it's documented in the README's turn-events table. The scope below is what's left.
+
 - The turn runner emits a `page_reload` frame when a tool result carries the `_page_reload` side-channel, giving the package a first-class way to drain what `ToolResultConverter` already preserves.
-- Both events join the `ChatStreamEvent` union in `resources/js/types/code-talker.d.ts` and are documented under **Frontend Integration** in the README alongside the existing seven.
+- `tool_use_progress` and `page_reload` both join the `ChatStreamEvent` union in `resources/js/types/code-talker.d.ts` — `tool_use_progress` is documented in the README but was never added to the published type declarations, so this closes that gap for both events at once.
 - The published `streamChatTurn` client gains `onToolProgress` and `onPageReload` callbacks. **This also fixes a latent trap**: the client's `dispatch()` currently drops unrecognized types in its `default:` case, so any host emitting these events today would find them silently swallowed by the published client.
 - Whether the reload latch belongs in the package's tool registry or stays a host concern is a design question, not settled here.
 

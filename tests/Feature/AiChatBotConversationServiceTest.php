@@ -6,6 +6,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
+use Jvjvjv\CodeTalker\CodeTalkerServiceProvider;
 use Jvjvjv\CodeTalker\Jobs\ProcessAiMemoryJob;
 use Jvjvjv\CodeTalker\Models\AiChatBot;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
@@ -65,6 +66,31 @@ class AiChatBotConversationServiceTest extends TestCase
                 $table->string('uuid')->nullable();
             });
         }
+    }
+
+    protected function tearDown(): void
+    {
+        $this->unregisterFixtureToolDirectory();
+
+        parent::tearDown();
+    }
+
+    /**
+     * `CodeTalkerServiceProvider::addToolDirectory()` accumulates in a static
+     * array with no unregister method — it models a host app calling it once,
+     * for the life of the process. Undoing it here keeps the fixture tool
+     * registered for this file's page_reload tests from leaking into other
+     * tests that pin the exact discovered tool set (e.g. ChatBotToolRegistryTest,
+     * ManagementServicesTest).
+     */
+    private function unregisterFixtureToolDirectory(): void
+    {
+        $property = new \ReflectionProperty(CodeTalkerServiceProvider::class, 'toolDirectories');
+        $property->setAccessible(true);
+
+        $directories = $property->getValue();
+        unset($directories[__DIR__ . '/../Fixtures/Tools']);
+        $property->setValue(null, $directories);
     }
 
     private function makeBot(array $systemAttributes = [], array $botAttributes = []): AiChatBot
@@ -383,6 +409,64 @@ class AiChatBotConversationServiceTest extends TestCase
         $resultFrame = $progressEvents->first(fn (array $event) => array_key_exists('output', $event));
         $this->assertNotNull($resultFrame);
         $this->assertTrue($resultFrame['successful']);
+    }
+
+    public function test_a_tool_result_carrying_page_reload_emits_a_page_reload_frame(): void
+    {
+        Queue::fake();
+
+        CodeTalkerServiceProvider::addToolDirectory(
+            __DIR__ . '/../Fixtures/Tools',
+            'Jvjvjv\\CodeTalker\\Tests\\Fixtures\\Tools\\',
+        );
+
+        CodeTalkerAgent::fake([
+            new ToolCall('tool-1', 'page-reloading-test-tool', []),
+            'Done, the page will reload.',
+        ]);
+
+        $bot = $this->makeBot(
+            ['allowed_tools' => ['page-reloading-test-tool']],
+            ['tools_enabled' => true],
+        );
+
+        $service = $this->app->make(AiChatBotConversationService::class);
+        $conversation = $service->startConversation($bot);
+
+        $events = $this->drainAndDecode($service->continueConversation($conversation, 'Do the thing'));
+
+        $types = array_column($events, 'type');
+        $this->assertContains('page_reload', $types);
+        $this->assertContains('tool_use_progress', $types);
+    }
+
+    public function test_a_tool_result_without_page_reload_does_not_emit_the_frame(): void
+    {
+        Queue::fake();
+        Http::fake([
+            'https://example.com/page' => Http::response(
+                '<html><head><title>Hi</title></head><body><p>Body text.</p></body></html>',
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8'],
+            ),
+        ]);
+
+        CodeTalkerAgent::fake([
+            new ToolCall('tool-1', 'fetch-web-page', ['url' => 'https://example.com/page']),
+            'Summary after reading the page',
+        ]);
+
+        $bot = $this->makeBot(
+            ['allowed_tools' => ['fetch-web-page']],
+            ['tools_enabled' => true],
+        );
+
+        $service = $this->app->make(AiChatBotConversationService::class);
+        $conversation = $service->startConversation($bot);
+
+        $events = $this->drainAndDecode($service->continueConversation($conversation, 'Read the page'));
+
+        $this->assertNotContains('page_reload', array_column($events, 'type'));
     }
 
     public function test_a_runaway_stream_is_aborted_when_it_exceeds_the_max_duration(): void

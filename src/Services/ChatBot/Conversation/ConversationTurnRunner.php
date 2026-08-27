@@ -159,6 +159,17 @@ class ConversationTurnRunner
                                 'successful' => $event->successful,
                             ];
                         }
+
+                        // `_page_reload` is a side-channel a tool's structured
+                        // result can carry (see ToolResultConverter) to tell the
+                        // browser server state changed and the page should
+                        // reload. `toolResult->result` is the raw JSON string
+                        // BridgedTool::handle() returned, not a decoded array.
+                        $decodedResult = json_decode((string) $event->toolResult->result, true);
+
+                        if (is_array($decodedResult) && ($decodedResult['_page_reload'] ?? false) === true) {
+                            yield ['type' => 'page_reload'];
+                        }
                     }
 
                     // Each provider request (a continuation attempt, or an
