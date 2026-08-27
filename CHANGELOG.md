@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.14.0] — [unreleased]
+## [0.14.0] — 2026-08-27
 
 Renames the reactive, human-triggered persona concept from "chat bot" to
 "persona", and adds a new "operator" concept for AI work a host dispatches
