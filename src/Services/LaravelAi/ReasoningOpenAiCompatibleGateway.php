@@ -103,13 +103,30 @@ class ReasoningOpenAiCompatibleGateway extends OpenAiCompatibleGateway
         $responseModel = $model;
 
         foreach ($this->parseServerSentEvents($streamBody) as $data) {
-            if (isset($data['error'])) {
+            // OpenAI-shaped errors nest under an "error" key. LM Studio's own
+            // engine-level failures (e.g. "context size exceeded") instead
+            // arrive as a flat frame — {"code", "message", "type"} with no
+            // "choices" — so both shapes must be recognized or the frame is
+            // silently treated as a contentless delta and the detail is lost.
+            $errorPayload = $data['error']
+                ?? (! isset($data['choices']) && isset($data['message']) ? $data : null);
+
+            if ($errorPayload !== null) {
+                $errorPayload = is_array($errorPayload) ? $errorPayload : ['message' => (string) $errorPayload];
+
+                $type = (string) ($errorPayload['type'] ?? $errorPayload['code'] ?? 'unknown_error');
+                $detail = (string) ($errorPayload['message'] ?? json_encode($errorPayload));
+                $message = $type !== 'unknown_error' && $type !== '' && ! str_contains($detail, $type)
+                    ? "{$detail} ({$type})"
+                    : $detail;
+
                 yield (new Error(
                     $this->generateEventId(),
-                    $data['error']['code'] ?? 'unknown_error',
-                    $data['error']['message'] ?? 'Unknown error',
+                    $type,
+                    $message,
                     false,
                     time(),
+                    $errorPayload,
                 ))->withInvocationId($invocationId);
 
                 return null;

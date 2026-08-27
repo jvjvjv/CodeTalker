@@ -310,7 +310,8 @@ Every event carries a `type`. These are typed in the published declarations.
 | `reasoning_block_delta` | `delta.reasoning`                                            |
 | `message_delta`         | `delta.stop_reason`, `usage`                                 |
 | `message_stop`          | —                                                            |
-| `tool_use_progress`     | `text` (always `""`), `tools` (one tool name per event)      |
+| `tool_use_progress`     | `text` (always `""`), `tools` (one tool name per event), plus `input`/`output`/`successful` when tool payloads are enabled |
+| `page_reload`           | —                                                             |
 | `error`                 | `message`, `reason` (`max_stream_duration`/`provider_error`) |
 
 `tool_use_progress` fires once per tool call the model makes mid-turn — the raw
@@ -318,6 +319,12 @@ provider `ToolCall`/`ToolResult` events are never forwarded (their payloads
 aren't display text), so without this a turn calling a tool, especially one
 retrying after an error, streams nothing but silence between text/reasoning
 deltas.
+
+`page_reload` fires when a tool's structured result carries `_page_reload:
+true` — see [Tool Registration](#tool-registration) for how a tool sets it.
+Deciding what "reload" means (call `location.reload()` immediately, wait for
+the turn to finish, debounce repeated signals) is left to the host; the
+package only reports that a tool changed server state.
 
 Encoded, each becomes `data: <json>\n\n`, and a turn that **finished** ends with
 `data: [DONE]\n\n`. An `error` event is terminal on its own and is *not*
@@ -446,6 +453,23 @@ public function register(): void
 Tools are auto-discovered from registered directories. The `AiSystem::allowed_tools`
 array controls which discovered tools are exposed to the model for a given bot, by
 tool name.
+
+### Signaling a page reload
+
+A tool that changes server state can tell the browser to reload by adding
+`_page_reload: true` to its structured result:
+
+```php
+return Response::structured([
+    'content' => 'Updated your profile.',
+    '_page_reload' => true,
+]);
+```
+
+The turn emits a `page_reload` event for that tool result (see
+[Turn events](#turn-events)). The `_page_reload` key itself stays in the
+result the model sees — it's a browser-facing side-channel, not something
+stripped from the tool's own output.
 
 > **Upgrading from a previous version:** the old `AiToolHandlerContract`
 > (`name()`/`description()`/`schema(): array`/`handle(array): array`) is deprecated

@@ -94,6 +94,25 @@ export interface ChatStreamErrorEvent {
     reason?: ChatStreamErrorReason;
 }
 
+/**
+ * The agent is calling a tool. `text` is always `""` — this is a progress
+ * signal, not display text. `input`/`output`/`successful` are present only
+ * when the host enabled tool payloads.
+ */
+export interface ToolUseProgressEvent {
+    type: 'tool_use_progress';
+    text: string;
+    tools: string[];
+    input?: unknown;
+    output?: unknown;
+    successful?: boolean;
+}
+
+/** A tool changed server state; the page should reload. */
+export interface PageReloadEvent {
+    type: 'page_reload';
+}
+
 /** Every event the message endpoint emits, discriminated on `type`. */
 export type ChatStreamEvent =
     | StatusEvent
@@ -102,6 +121,8 @@ export type ChatStreamEvent =
     | ReasoningBlockDeltaEvent
     | MessageDeltaEvent
     | MessageStopEvent
+    | ToolUseProgressEvent
+    | PageReloadEvent
     | ChatStreamErrorEvent;
 
 /** The literal frame that terminates a turn that finished normally. */

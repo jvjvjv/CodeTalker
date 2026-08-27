@@ -43,4 +43,4 @@
 
 ## 7. Deferred
 
-- [ ] 7.1 Raw exchange logging (`Services/RawExchange/`, 855 lines, its own table, retention command, and interactive reader) is **retained**. It is a laravel/ai debugging tool with no chatbot coupling and is the strongest candidate for extraction into its own package before any 1.0. No action this release beyond recording the intent
+- [x] 7.1 Raw exchange logging (`Services/RawExchange/`, 855 lines, its own table, retention command, and interactive reader) is **retained**. It is a laravel/ai debugging tool with no chatbot coupling and is the strongest candidate for extraction into its own package before any 1.0. No action this release beyond recording the intent
