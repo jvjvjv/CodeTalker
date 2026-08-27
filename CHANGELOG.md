@@ -1,12 +1,14 @@
 # Changelog
 
-## [0.13.0] — 2026-08-26
+
+## [0.13.0] — 2026-08-27
 
 ### New Features
 - Added the `page_reload` turn event: a tool can add `_page_reload: true` to its structured result to tell the browser server state changed and the page should reload. The published client gains a matching `onPageReload` callback.
 - The published client gains an `onToolProgress` callback for the existing `tool_use_progress` event.
 
 ### Bug Fixes
+- LM Studio's own engine-level failures (e.g. context-size-exceeded) are no longer silently dropped. These arrive as a flat error frame — `{"code","message","type"}` with no `"error"` wrapper and no `"choices"` — distinct from OpenAI's nested shape, and were previously treated as a contentless delta.
 - `tool_use_progress` is now part of the published `ChatStreamEvent` type declarations and is dispatched by the published stream client — previously the type was undeclared and the client silently dropped the event.
 
 ## [0.12.1] — 2026-08-26

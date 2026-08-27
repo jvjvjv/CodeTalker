@@ -8,6 +8,7 @@ use Jvjvjv\CodeTalker\Services\LaravelAi\ReasoningOpenAiCompatibleGateway;
 use Jvjvjv\CodeTalker\Services\LaravelAi\ReasoningOpenAiCompatibleProvider;
 use Jvjvjv\CodeTalker\Tests\TestCase;
 use Laravel\Ai\AiManager;
+use Laravel\Ai\Streaming\Events\Error as ErrorEvent;
 use Laravel\Ai\Streaming\Events\ReasoningDelta;
 use Laravel\Ai\Streaming\Events\TextDelta;
 use Laravel\Ai\Streaming\Events\ToolCall as ToolCallEvent;
@@ -92,6 +93,33 @@ class ReasoningOpenAiCompatibleGatewayTest extends TestCase
 
         $this->assertCount(1, $toolCalls);
         $this->assertSame('search', $toolCalls[0]->toolCall->name);
+    }
+
+    public function test_openai_shaped_error_frame_yields_a_detailed_error_event(): void
+    {
+        $sse = 'data: {"error":{"code":500,"message":"Context size has been exceeded.","type":"server_error"}}' . "\n\n";
+
+        $events = $this->streamEvents($sse);
+        $errors = array_values(array_filter($events, fn ($e) => $e instanceof ErrorEvent));
+
+        $this->assertCount(1, $errors);
+        $this->assertSame('server_error', $errors[0]->type);
+        $this->assertSame('Context size has been exceeded. (server_error)', $errors[0]->message);
+        $this->assertFalse($errors[0]->recoverable);
+    }
+
+    public function test_lm_studio_flat_error_frame_is_not_dropped(): void
+    {
+        // LM Studio's own engine-level failures arrive as a flat frame — no
+        // "error" wrapper key and no "choices" — unlike OpenAI's nested shape.
+        $sse = 'data: {"code":500,"message":"Context size has been exceeded.","type":"server_error"}' . "\n\n";
+
+        $events = $this->streamEvents($sse);
+        $errors = array_values(array_filter($events, fn ($e) => $e instanceof ErrorEvent));
+
+        $this->assertCount(1, $errors);
+        $this->assertSame('server_error', $errors[0]->type);
+        $this->assertSame('Context size has been exceeded. (server_error)', $errors[0]->message);
     }
 
     public function test_the_openai_compatible_driver_resolves_to_the_reasoning_provider(): void
