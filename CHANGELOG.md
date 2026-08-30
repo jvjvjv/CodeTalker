@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.14.1] — 2026-08-30
+
+### New Features
+- LM Studio model listings now include `size_bytes`, the on-disk size of each model, alongside the existing id, display name, load state, context length, and capabilities.
+
 ## [0.14.0] — 2026-08-27
 
 Renames the reactive, human-triggered persona concept from "chat bot" to
