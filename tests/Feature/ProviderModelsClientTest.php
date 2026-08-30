@@ -96,6 +96,7 @@ class ProviderModelsClientTest extends TestCase
                         'display_name' => 'Qwen3 8B',
                         'loaded_instances' => [['id' => 'i1']],
                         'max_context_length' => 32768,
+                        'size_bytes' => 4900000000,
                         'capabilities' => ['vision' => false, 'trained_for_tool_use' => true, 'reasoning' => true],
                     ],
                 ],
@@ -107,6 +108,7 @@ class ProviderModelsClientTest extends TestCase
         $this->assertSame('qwen3-8b', $models[0]['id']);
         $this->assertTrue($models[0]['loaded']);
         $this->assertSame(32768, $models[0]['max_context_length']);
+        $this->assertSame(4900000000, $models[0]['size_bytes']);
         $this->assertTrue($models[0]['capabilities']['tools']);
     }
 

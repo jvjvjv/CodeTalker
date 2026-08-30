@@ -38,7 +38,7 @@ class LmStudioServerClient
      * Lists all models available on disk (loaded and unloaded).
      * Uses the native LM Studio /api/v1/models endpoint.
      *
-     * @return array<int, array{id: string, display_name: string, loaded: bool, max_context_length: int|null, capabilities: array{vision: bool, tools: bool, reasoning: bool}}>
+     * @return array<int, array{id: string, display_name: string, loaded: bool, max_context_length: int|null, size_bytes: int|null, capabilities: array{vision: bool, tools: bool, reasoning: bool}}>
      */
     public function listModels(): array
     {
@@ -65,6 +65,7 @@ class LmStudioServerClient
                     'display_name' => (string) ($m['display_name'] ?? $m['key']),
                     'loaded' => !empty($m['loaded_instances']),
                     'max_context_length' => isset($m['max_context_length']) ? (int) $m['max_context_length'] : null,
+                    'size_bytes' => isset($m['size_bytes']) ? (int) $m['size_bytes'] : null,
                     'capabilities' => [
                         'vision' => (bool) ($capabilities['vision'] ?? false),
                         'tools' => (bool) ($capabilities['trained_for_tool_use'] ?? false),

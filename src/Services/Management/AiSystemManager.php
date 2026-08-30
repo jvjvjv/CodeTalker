@@ -313,7 +313,7 @@ class AiSystemManager
      *
      * Provider failures propagate; the caller decides how to surface them.
      *
-     * @return array<int, array{id: string, name: string, loaded: bool, max_context_length: int|null, capabilities: array{reasoning: bool|null, vision: bool, tools: bool|null}}>
+     * @return array<int, array{id: string, name: string, loaded: bool, max_context_length: int|null, size_bytes: int|null, capabilities: array{reasoning: bool|null, vision: bool, tools: bool|null}}>
      *
      * @throws InvalidArgumentException if the provider needs an API key and none was given
      */
@@ -333,6 +333,7 @@ class AiSystemManager
                 'name' => $model['display_name'] ?? $model['id'],
                 'loaded' => (bool) ($model['loaded'] ?? false),
                 'max_context_length' => $model['max_context_length'] ?? null,
+                'size_bytes' => $model['size_bytes'] ?? null,
                 'capabilities' => [
                     // Only LM Studio's model list reports capabilities at all; leaving
                     // `reasoning`/`tools` unset (rather than defaulting to false) for every
