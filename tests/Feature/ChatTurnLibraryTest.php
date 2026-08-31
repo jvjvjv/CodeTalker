@@ -98,6 +98,22 @@ class ChatTurnLibraryTest extends TestCase
         );
     }
 
+    public function test_a_heartbeat_is_encoded_as_a_comment_frame(): void
+    {
+        $frames = iterator_to_array((new SseFrameEncoder())->encode([
+            ['type' => 'heartbeat'],
+            ['type' => 'content_block_delta', 'delta' => ['text' => 'Hi']],
+        ]), false);
+
+        // A comment frame: every SSE consumer ignores it, including the
+        // published client, which only reads lines beginning with "data:".
+        $this->assertSame(": ping\n\n", $frames[0]);
+        $this->assertStringStartsWith('data: {', $frames[1]);
+
+        // A heartbeat is not an error, so the turn still terminates normally.
+        $this->assertSame("data: [DONE]\n\n", $frames[2]);
+    }
+
     // ------------------------------------------------------------ access rules
 
     public function test_an_inactive_bot_cannot_open_a_conversation(): void

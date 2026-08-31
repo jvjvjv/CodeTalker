@@ -20,6 +20,7 @@ use Jvjvjv\CodeTalker\Services\ConversationUsageService;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AiSystemProviderConfigurator;
 use Jvjvjv\CodeTalker\Services\LaravelAi\CodeTalkerAgent;
+use Jvjvjv\CodeTalker\Services\LaravelAi\Streaming\Heartbeat;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeContext;
 use Jvjvjv\CodeTalker\Tests\TestCase;
 use Closure;
@@ -36,7 +37,9 @@ use Laravel\Ai\Responses\Data\ToolCall;
 use Laravel\Ai\Responses\Data\Usage;
 use Laravel\Ai\Streaming\Events\Error;
 use Laravel\Ai\Streaming\Events\ReasoningDelta;
+use Laravel\Ai\Streaming\Events\StreamEnd;
 use Laravel\Ai\Streaming\Events\StreamStart;
+use Laravel\Ai\Streaming\Events\TextDelta;
 use RuntimeException;
 
 class AiPersonaConversationServiceTest extends TestCase
@@ -127,6 +130,14 @@ class AiPersonaConversationServiceTest extends TestCase
 
         foreach ((new SseFrameEncoder())->encode($stream) as $line) {
             $rawLines[] = $line;
+
+            // A heartbeat travels as an SSE comment, not a data frame. Map it
+            // back to its structured form so assertions can still count it.
+            if (str_starts_with($line, ':')) {
+                $events[] = ['type' => 'heartbeat'];
+
+                continue;
+            }
 
             $payload = trim(str_replace('data: ', '', $line));
 
@@ -878,5 +889,111 @@ class AiPersonaConversationServiceTest extends TestCase
         $this->assertArrayHasKey('error', $request->request_data);
 
         Queue::assertNotPushed(ProcessAiMemoryJob::class);
+    }
+
+    /**
+     * Install a gateway that emits heartbeats between its text deltas — a
+     * model that is slow to produce tokens rather than one that has stopped.
+     */
+    private function fakeHeartbeatingGateway(int $beats): void
+    {
+        CodeTalkerAgent::fake([]);
+
+        $gateway = new class([], $beats) extends FakeTextGateway {
+            public function __construct(array $responses, private int $beats)
+            {
+                parent::__construct($responses);
+            }
+
+            public function generateStreamStep(
+                string $invocationId,
+                TextProvider $provider,
+                string $model,
+                ?string $instructions,
+                array $messages,
+                array $tools,
+                ?array $schema,
+                ?TextGenerationOptions $options,
+                ?int $timeout,
+                StepContext $stepContext,
+            ): Generator {
+                yield (new StreamStart(uniqid('', true), $provider->name(), $model, time()))
+                    ->withInvocationId($invocationId);
+
+                for ($i = 0; $i < $this->beats; $i++) {
+                    yield (new Heartbeat(uniqid('', true), time()))->withInvocationId($invocationId);
+                }
+
+                yield (new TextDelta(uniqid('', true), 'm1', 'Done', time()))
+                    ->withInvocationId($invocationId);
+
+                yield (new StreamEnd(uniqid('', true), 'stop', new Usage(), time()))
+                    ->withInvocationId($invocationId);
+
+                return new StepResponse(
+                    'Done', [], FinishReason::Stop, new Usage(), new Meta($provider->name(), $model),
+                );
+            }
+        };
+
+        $manager = $this->app->make(AiManager::class);
+        (Closure::bind(function () use ($gateway): void {
+            $this->fakeAgentGateways[CodeTalkerAgent::class] = $gateway;
+        }, $manager, $manager::class))();
+    }
+
+    public function test_a_heartbeat_reaches_the_browser_but_never_the_stored_events(): void
+    {
+        Queue::fake();
+        $this->fakeHeartbeatingGateway(beats: 3);
+
+        $persona = $this->makePersona();
+        $service = $this->app->make(AiPersonaConversationService::class);
+
+        $conversation = $service->startConversation($persona);
+        $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi'));
+
+        $this->assertSame(3, count(array_filter($events, fn ($e) => ($e['type'] ?? null) === 'heartbeat')));
+
+        // The stored event log is a record of what the model did, not of how
+        // long it took to do it.
+        $logged = AiLlmMessage::where('direction', 'response')->first()->response_data['events'];
+        $this->assertNotContains('heartbeat', array_column($logged, 'type'));
+
+        // The answer itself is unaffected.
+        $this->assertSame('Done', AiConversationMessage::where('role', 'assistant')->first()->content);
+    }
+
+    public function test_the_max_duration_guard_trips_on_a_heartbeat_with_no_provider_event(): void
+    {
+        Queue::fake();
+        config()->set('code-talker.conversations.max_stream_seconds', 60);
+        $this->fakeHeartbeatingGateway(beats: 3);
+
+        $persona = $this->makePersona();
+
+        // Elapsed time only goes over budget after the StreamStart, so the
+        // guard has nothing but heartbeats to trip on.
+        $service = new class(
+            $this->app->make(AgentFactory::class),
+            $this->app->make(AiMemoryService::class),
+            $this->app->make(ConversationUsageService::class),
+            $this->app->make(RawExchangeContext::class),
+            $this->app->make(AiSystemProviderConfigurator::class),
+        ) extends AiPersonaConversationService {
+            private int $calls = 0;
+
+            protected function streamElapsedSeconds(float $startedAt): float
+            {
+                return ++$this->calls > 1 ? 9999.0 : 0.0;
+            }
+        };
+
+        $conversation = $service->startConversation($persona);
+        $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi'));
+
+        $error = collect($events)->firstWhere('type', 'error');
+        $this->assertNotNull($error);
+        $this->assertSame('max_stream_duration', $error['reason']);
     }
 }

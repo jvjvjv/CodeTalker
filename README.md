@@ -347,6 +347,7 @@ Every event carries a `type`. These are typed in the published declarations.
 | `reasoning_block_delta` | `delta.reasoning`                                            |
 | `message_delta`         | `delta.stop_reason` (`end_turn`/`max_tokens`/`tool_use`/`incomplete`), `usage` |
 | `message_stop`          | —                                                            |
+| `heartbeat`             | — (encoded as an SSE comment, not a data frame)              |
 | `tool_use_progress`     | `text` (always `""`), `tools` (one tool name per event), plus `input`/`output`/`successful` when tool payloads are enabled |
 | `page_reload`           | —                                                             |
 | `error`                 | `message`, `reason` (`max_stream_duration`/`provider_error`) |
@@ -361,6 +362,15 @@ deltas.
 dropped, or the server's duration guard cut the generation off. Whatever
 content arrived stops mid-answer, and the turn is stored that way (see
 [Interrupted turns](#interrupted-turns)).
+
+`heartbeat` fires while the provider is silent. `SseFrameEncoder` renders it as
+`: ping` — an SSE comment — so browsers and the published client ignore it
+without any handling. It is there so something reaches the socket during a long
+gap: intermediaries stop timing out mid-answer, and PHP only flips
+`connection_aborted()` after a write to a dead connection, so without it an
+abandoned turn keeps generating until the model's next event. Set
+`conversations.heartbeat_seconds` to `0` to disable. Detection costs two beats:
+the first write marks the socket dead, the second observes it.
 
 `page_reload` fires when a tool's structured result carries `_page_reload:
 true` — see [Tool Registration](#tool-registration) for how a tool sets it.

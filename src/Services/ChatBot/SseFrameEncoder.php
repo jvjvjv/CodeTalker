@@ -23,6 +23,15 @@ class SseFrameEncoder
         $failed = false;
 
         foreach ($events as $event) {
+            // A comment frame, not a data frame: it exists to put a byte on
+            // the wire during a silent gap, and every SSE consumer ignores it
+            // without being taught to.
+            if (($event['type'] ?? null) === 'heartbeat') {
+                yield ": ping\n\n";
+
+                continue;
+            }
+
             // An error event is terminal on its own — nothing follows it, and
             // the stream is not sentinel-terminated. Consumers rely on this to
             // tell a failed turn from a finished one.

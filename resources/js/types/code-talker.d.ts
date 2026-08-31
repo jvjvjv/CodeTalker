@@ -123,6 +123,14 @@ export interface PageReloadEvent {
     type: 'page_reload';
 }
 
+/**
+ * `heartbeat` is deliberately absent from this union. The server yields it as
+ * a turn event, but `SseFrameEncoder` writes it as an SSE comment (`: ping`),
+ * which never arrives as a message — so a wire consumer cannot receive one and
+ * should not be made to handle it. A host consuming the events directly,
+ * without the SSE encoding, will see `{ type: 'heartbeat' }`.
+ */
+
 /** Every event the message endpoint emits, discriminated on `type`. */
 export type ChatStreamEvent =
     | StatusEvent
