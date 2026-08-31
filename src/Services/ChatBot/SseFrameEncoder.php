@@ -37,7 +37,14 @@ class SseFrameEncoder
             // tell a failed turn from a finished one.
             $failed = ($event['type'] ?? null) === 'error';
 
-            yield 'data: ' . json_encode($event) . "\n\n";
+            // `_seq` is framing metadata, not part of the event vocabulary: it
+            // becomes the SSE id a reconnecting consumer resumes from, and
+            // never reaches the browser inside the payload.
+            $sequence = $event['_seq'] ?? null;
+            unset($event['_seq']);
+
+            yield ($sequence === null ? '' : 'id: ' . $sequence . "\n")
+                . 'data: ' . json_encode($event) . "\n\n";
         }
 
         if (! $failed) {
