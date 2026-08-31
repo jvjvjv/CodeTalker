@@ -103,6 +103,14 @@ return [
     'conversations' => [
         'idle_timeout_minutes' => (int) env('CODE_TALKER_CONVERSATION_IDLE_MINUTES', 30),
 
+        // Seconds of provider silence before the turn emits a heartbeat.
+        // Two things depend on it: intermediaries stop timing out during a
+        // long gap, and PHP only flips connection_aborted() after a write to
+        // a dead socket — so without a heartbeat an abandoned turn keeps
+        // generating until the model's next event, which on a large context
+        // can be minutes. Set to 0 to disable.
+        'heartbeat_seconds' => (int) env('CODE_TALKER_HEARTBEAT_SECONDS', 5),
+
         // Wall-clock ceiling (seconds) for a single streamed chat turn, across
         // all tool steps and continuation attempts. Guards against a runaway
         // generation — e.g. a reasoning model that loops until it overflows the
