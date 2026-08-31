@@ -7,8 +7,12 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\CodeTalkerServiceProvider;
+use Jvjvjv\CodeTalker\Enums\AiTurnRunStatus;
 use Jvjvjv\CodeTalker\Jobs\ProcessAiMemoryJob;
+use Jvjvjv\CodeTalker\Jobs\RunConversationTurnJob;
 use Jvjvjv\CodeTalker\Models\AiPersona;
+use Jvjvjv\CodeTalker\Models\AiTurnRun;
+use Jvjvjv\CodeTalker\Services\Conversation\TurnRunStore;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 use Jvjvjv\CodeTalker\Models\AiInteractionLog;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
@@ -995,5 +999,60 @@ class AiPersonaConversationServiceTest extends TestCase
         $error = collect($events)->firstWhere('type', 'error');
         $this->assertNotNull($error);
         $this->assertSame('max_stream_duration', $error['reason']);
+    }
+
+    public function test_dispatching_a_turn_queues_a_job_against_a_new_run(): void
+    {
+        Queue::fake();
+
+        $persona = $this->makePersona();
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
+
+        $run = $service->dispatchTurn($conversation, 'Hi there');
+
+        $this->assertSame(AiTurnRunStatus::Queued, $run->status);
+        $this->assertSame('Hi there', $run->prompt);
+        $this->assertNotEmpty($run->public_id);
+
+        Queue::assertPushed(
+            RunConversationTurnJob::class,
+            fn (RunConversationTurnJob $job): bool => $job->turnRunId === $run->id,
+        );
+    }
+
+    public function test_resuming_a_turn_streams_its_stored_events(): void
+    {
+        Queue::fake();
+        config()->set('code-talker.turns.poll_interval_ms', 1);
+
+        $persona = $this->makePersona();
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
+
+        $run = $service->dispatchTurn($conversation, 'Hi');
+
+        $store = $this->app->make(TurnRunStore::class);
+        $store->markRunning($run);
+        $store->append($run, ['type' => 'content_block_delta', 'delta' => ['text' => 'Hi']]);
+        $store->finish($run, AiTurnRunStatus::Completed);
+
+        $events = iterator_to_array($service->resumeTurn($run), false);
+
+        $this->assertSame(['content_block_delta'], array_column($events, 'type'));
+    }
+
+    public function test_cancelling_a_turn_marks_it_for_the_worker(): void
+    {
+        Queue::fake();
+
+        $persona = $this->makePersona();
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($persona);
+
+        $run = $service->dispatchTurn($conversation, 'Hi');
+        $service->cancelTurn($run);
+
+        $this->assertNotNull($run->fresh()->cancel_requested_at);
     }
 }
