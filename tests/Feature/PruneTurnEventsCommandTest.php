@@ -78,4 +78,16 @@ class PruneTurnEventsCommandTest extends TestCase
         // A long-running turn is not garbage, however old the row is.
         $this->assertNotNull(AiTurnRun::find($live->id));
     }
+
+    public function test_zero_retention_days_disables_pruning_instead_of_deleting_everything(): void
+    {
+        config()->set('code-talker.turns.retention_days', 0);
+
+        $old = $this->makeRun(AiTurnRunStatus::Completed, daysOld: 365);
+
+        $this->artisan('ai:prune-turn-events')->assertExitCode(0);
+
+        $this->assertNotNull(AiTurnRun::find($old->id));
+        $this->assertSame(1, AiTurnEvent::where('ai_turn_run_id', $old->id)->count());
+    }
 }

@@ -9,6 +9,10 @@ use Jvjvjv\CodeTalker\Models\AiTurnRun;
 
 class PruneTurnEventsCommand extends Command
 {
+    // Paged so a first sweep over a large backlog never binds an unbounded id
+    // list into one delete (SQLite variable cap, MySQL max_allowed_packet).
+    private const PAGE_SIZE = 1000;
+
     protected $signature = 'ai:prune-turn-events';
 
     protected $description = 'Delete finished turn runs and their events past the retention window';
@@ -28,23 +32,38 @@ class PruneTurnEventsCommand extends Command
             array_filter(AiTurnRunStatus::cases(), static fn (AiTurnRunStatus $s): bool => $s->isTerminal()),
         ));
 
-        // Only finished runs: a turn still generating is not garbage, however
-        // long it has been going.
-        $runIds = AiTurnRun::query()
-            ->whereIn('status', $terminal)
-            ->where('created_at', '<', now()->subDays($days))
-            ->pluck('id');
+        $cutoff = now()->subDays($days);
+        $pruned = 0;
 
-        if ($runIds->isEmpty()) {
+        do {
+            // Only finished runs: a turn still generating is not garbage,
+            // however long it has been going.
+            $runIds = AiTurnRun::query()
+                ->whereIn('status', $terminal)
+                ->where('created_at', '<', $cutoff)
+                ->orderBy('id')
+                ->limit(self::PAGE_SIZE)
+                ->pluck('id');
+
+            if ($runIds->isEmpty()) {
+                break;
+            }
+
+            // Events before runs: a failure between the two leaves runs whose
+            // events are gone, and the next sweep re-selects and finishes them.
+            AiTurnEvent::query()->whereIn('ai_turn_run_id', $runIds)->delete();
+            AiTurnRun::query()->whereIn('id', $runIds)->delete();
+
+            $pruned += $runIds->count();
+        } while ($runIds->count() === self::PAGE_SIZE);
+
+        if ($pruned === 0) {
             $this->info('No turn runs past retention.');
 
             return self::SUCCESS;
         }
 
-        AiTurnEvent::query()->whereIn('ai_turn_run_id', $runIds)->delete();
-        AiTurnRun::query()->whereIn('id', $runIds)->delete();
-
-        $this->info("Pruned {$runIds->count()} turn run(s).");
+        $this->info("Pruned {$pruned} turn run(s).");
 
         return self::SUCCESS;
     }

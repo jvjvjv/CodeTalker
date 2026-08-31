@@ -20,7 +20,7 @@ enum AiTurnRunStatus: string
     {
         return match ($this) {
             self::Queued, self::Running => false,
-            default => true,
+            self::Completed, self::Failed, self::Cancelled, self::Abandoned => true,
         };
     }
 }
