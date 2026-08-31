@@ -50,16 +50,22 @@ class TurnEventStream
                 continue;
             }
 
-            // Nothing new. Read the status only now, and drain once more before
-            // stopping: the job appends its last event and *then* marks the run
-            // finished, so checking status first would drop that event.
+            // Nothing new. Read the status only now, and drain before stopping:
+            // the job appends its last event and *then* marks the run finished,
+            // so checking status first would drop that event. The drain pages
+            // until it comes back empty — eventsAfter() caps each read, and a
+            // backlog larger than one page must not be truncated.
             if ($run->fresh()?->status->isTerminal() ?? true) {
-                foreach ($this->store->eventsAfter($run, $after) as $event) {
-                    /** @var AiTurnEvent $event */
-                    $after = $event->sequence;
+                do {
+                    $drained = $this->store->eventsAfter($run, $after);
 
-                    yield $event->payload + ['_seq' => $event->sequence];
-                }
+                    foreach ($drained as $event) {
+                        /** @var AiTurnEvent $event */
+                        $after = $event->sequence;
+
+                        yield $event->payload + ['_seq' => $event->sequence];
+                    }
+                } while ($drained->isNotEmpty());
 
                 return;
             }
