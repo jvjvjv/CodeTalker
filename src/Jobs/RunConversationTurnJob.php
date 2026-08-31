@@ -59,12 +59,36 @@ class RunConversationTurnJob implements ShouldQueue
 
         $store->markRunning($run);
 
+        $errorSeen = false;
+        $errorMessage = null;
+
         try {
             $events = $chat
                 ->usingCancellationCheck(fn (): bool => $store->shouldStop($run))
                 ->continueConversation($run->conversation, $run->prompt);
 
             foreach ($events as $event) {
+                // A heartbeat is consumed here, never stored: it reports that
+                // the provider was silent, not that anything happened, and
+                // SseFrameEncoder transmits it as a comment with no id — so a
+                // stored one would burn a sequence number a reader never sees,
+                // leaving a reconnecting client's `after` cursor behind the
+                // real sequence and replaying events it already had.
+                // TurnEventStream synthesizes its own heartbeat whenever the
+                // store is quiet, which is what a reader actually needs.
+                if (($event['type'] ?? null) === 'heartbeat') {
+                    continue;
+                }
+
+                // continueConversation() catches provider failures internally
+                // and yields a terminal error event instead of throwing, so
+                // the generator completes normally — remember the failure or
+                // the run would be recorded as a clean completion.
+                if (($event['type'] ?? null) === 'error') {
+                    $errorSeen = true;
+                    $errorMessage = $event['message'] ?? null;
+                }
+
                 $store->append($run, $event);
             }
         } catch (Throwable $exception) {
@@ -73,10 +97,18 @@ class RunConversationTurnJob implements ShouldQueue
             throw $exception;
         }
 
-        $store->finish(
-            $run,
-            $store->shouldStop($run) ? $store->stopStatusFor($run) : AiTurnRunStatus::Completed,
-        );
+        // Terminal status precedence: an error event outranks a stop request
+        // (in practice disjoint — a client abort yields no error event, and a
+        // provider failure ends the turn before any stop is noticed — but the
+        // precedence is explicit so that stays true), and only a run that saw
+        // neither is Completed.
+        if ($errorSeen) {
+            $store->finish($run, AiTurnRunStatus::Failed, $errorMessage);
+        } elseif ($store->shouldStop($run)) {
+            $store->finish($run, $store->stopStatusFor($run));
+        } else {
+            $store->finish($run, AiTurnRunStatus::Completed);
+        }
     }
 
     /**

@@ -177,6 +177,15 @@ killing it (see [Running a turn as a job](#running-a-turn-as-a-job)).
   `php artisan ai:prune-turn-events`, scheduled daily at 03:15 (respects the
   `schedule` flag).
 
+Note that `turns.max_stream_seconds` bounds only the read side. Generation
+inside the worker is governed by `conversations.max_stream_seconds` (default
+300), which caps each individual provider request — the same guard the
+synchronous path applies, enforced promptly during provider silence by the
+heartbeat rather than only when the next provider event arrives. A host running
+a large-context local model, where prompt processing alone can occupy minutes
+of a single request, should raise `conversations.max_stream_seconds`
+accordingly.
+
 ### Troubleshooting
 
 **`Provider is unavailable: HTTP request returned status code 404`** — returned
@@ -456,7 +465,7 @@ matters, dispatch the turn instead and stream it from its store.
 
 ```php
 // Start it. Returns an AiTurnRun; `public_id` is the handle to put in a URL.
-$run = $chat->dispatchTurn($conversation, $request->string('message'));
+$run = $chat->dispatchTurn($conversation, $request->string('message')->toString());
 
 // Stream it — from the start, or from wherever the browser left off.
 foreach ($encoder->encode($chat->resumeTurn($run, $after)) as $frame) {
