@@ -267,7 +267,13 @@ class AiPersonaConversationService
     {
         $run = app(TurnRunStore::class)->open($conversation, $message);
 
-        RunConversationTurnJob::dispatch($run->id);
+        // afterCommit(): a host may wrap this call in its own transaction, and
+        // with a Redis/SQS queue a worker could pick the job up before the run
+        // row commits — the job would find nothing and return, leaving the run
+        // Queued while a reader polls heartbeats until the stream ceiling.
+        // With no transaction open the job dispatches immediately, so this is
+        // safe unconditionally.
+        RunConversationTurnJob::dispatch($run->id)->afterCommit();
 
         return $run;
     }
@@ -275,9 +281,13 @@ class AiPersonaConversationService
     /**
      * Stream a dispatched turn's events, starting after the given sequence.
      *
-     * Yields the same structured events continueConversation() does, each with
-     * a `_seq` the encoder turns into an SSE id. A browser that reconnects
-     * passes back the last sequence it saw and misses nothing in between.
+     * Yields the turn's stored events — the shapes continueConversation()
+     * produces — each carrying a `_seq` the encoder turns into an SSE id, plus
+     * events the stream synthesizes while waiting on the store: a `heartbeat`
+     * per beat of silence, and a `max_stream_duration` error at the reader
+     * ceiling. Synthesized events are never stored and carry no `_seq`, so
+     * read that key conditionally. A browser that reconnects passes back the
+     * last sequence it saw and misses nothing in between.
      *
      * @return Generator<int, array<string, mixed>>
      */
