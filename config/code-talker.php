@@ -339,4 +339,25 @@ return [
         'retention_days' => (int) env('CODE_TALKER_RAW_EXCHANGES_RETENTION_DAYS', 14),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Detached Turns
+    |--------------------------------------------------------------------------
+    |
+    | A turn dispatched with AiPersonaConversationService::dispatchTurn() runs
+    | as a queued job and writes its events to ai_turn_events, so a browser
+    | reload resumes the turn instead of killing it. connection_aborted() is
+    | meaningless in a worker, so "nobody has polled for abandon_after_seconds"
+    | is what stops a turn nobody is waiting for.
+    |
+    */
+
+    'turns' => [
+        'queue' => env('CODE_TALKER_TURN_QUEUE'),
+        'abandon_after_seconds' => (int) env('CODE_TALKER_TURN_ABANDON_SECONDS', 30),
+        'poll_interval_ms' => (int) env('CODE_TALKER_TURN_POLL_MS', 250),
+        'max_stream_seconds' => (int) env('CODE_TALKER_TURN_MAX_STREAM_SECONDS', 900),
+        'retention_days' => (int) env('CODE_TALKER_TURN_RETENTION_DAYS', 7),
+    ],
+
 ];
