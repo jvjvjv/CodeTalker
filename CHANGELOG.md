@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.15.0] — 2026-08-31
+
+A turn cut short is no longer thrown away. Whatever it produced is persisted and
+marked incomplete, and it is no longer logged as a clean success.
+
+### Breaking Changes
+- `ai_interaction_logs.status` has a new value, `aborted` (`AiInteractionStatus::Aborted`), used for a turn whose caller hung up mid-stream. It was previously recorded as `success`. Code matching exhaustively on the enum must handle the new case, and dashboards that count everything other than `success` as a failure will now count cancellations among them. The tokens an aborted turn burned still count towards conversation usage totals.
+- The `message_delta` event's `delta.stop_reason` has a new value, `incomplete`, for a turn that never finished — the caller hung up, or the max-stream-duration guard cut the generation off. Such turns previously reported `end_turn`, which was indistinguishable from a clean finish. The same value is stored on `ai_llm_messages.response_data.stop_reason`.
+- An interrupted turn now leaves an assistant message in the transcript even when it produced no text, so `ChatBotPresenter::transcript()` can return assistant rows whose `content` is empty. Each row carries a new `incomplete` boolean; render a flagged row as an interrupted reply rather than as a blank answer.
+- Two new migrations (`ai_turn_runs`, `ai_turn_events`) ship with this release. Re-publish migrations and run them, even if you do not use the dispatched-turn API — `ai:prune-turn-events` is scheduled by default and expects the tables.
+
+### New Features
+- An interrupted assistant message records why in its `metadata`: `incomplete` plus an `incomplete_reason` of `client_aborted` or `max_stream_duration`.
+- Turns now emit a heartbeat while the provider is silent (`conversations.heartbeat_seconds`, default 5, `0` to disable). It is encoded as an SSE comment, so existing clients ignore it; it keeps intermediaries from timing out mid-answer and lets an abandoned turn be noticed in seconds rather than minutes. Currently emitted for `openai-compatible` and `lm-studio` systems; a turn dispatched as a job heartbeats for every provider.
+- Added `AiPersonaConversationService::dispatchTurn()`, `resumeTurn()` and `cancelTurn()`: a turn can run as a queued job that records its events, so a browser reload resumes it instead of killing it. Events are framed with an SSE `id:` carrying their sequence, and the published client reports it through a new `onSequence` callback. Requires the two new migrations and a queue worker.
+- Added `ai:prune-turn-events` (scheduled daily at 03:15) to clear finished turn runs past `turns.retention_days`.
+
+### Bug Fixes
+- A turn interrupted before the model emitted any text is no longer discarded entirely. It previously left the user's message in the transcript with no reply beneath it and no record that a turn had ever run — the failure mode was most visible with a large context, where a model can spend minutes processing the prompt before its first token.
+- Tool calls an interrupted turn already made are now persisted with it. They were dropped along with the rest of the turn, leaving the next turn's history with no record that a tool had run and changed state.
+- The maximum-stream-duration guard now applies during provider silence. It was only evaluated when an event arrived, so a stalled stream could run well past `conversations.max_stream_seconds` before anything noticed.
+
 ## [0.14.1] — 2026-08-30
 
 ### New Features

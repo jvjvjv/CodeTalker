@@ -64,6 +64,12 @@ export interface ChatTurnCallbacks {
      * delivered through onText/onReasoning is still valid.
      */
     onError?: (error: ChatTurnError) => void;
+    /**
+     * The sequence of the last event received, present only for a turn
+     * dispatched with `dispatchTurn()`. Pass it back as `after` when
+     * reconnecting so the turn resumes rather than replays.
+     */
+    onSequence?: (sequence: number) => void;
 }
 
 export interface ChatTurn {
@@ -213,6 +219,18 @@ async function consume(body: ReadableStream<Uint8Array>, callbacks: ChatTurnCall
  * @return true when the stream is finished and reading should stop.
  */
 function dispatch(frame: string, callbacks: ChatTurnCallbacks): boolean {
+    const idLine = frame.split('\n').find((line) => line.startsWith('id:'));
+
+    if (idLine !== undefined) {
+        const parsed = Number.parseInt(idLine.slice(3).trim(), 10);
+
+        if (!Number.isNaN(parsed)) {
+            // Recorded so a caller reconnecting after a dropped connection can
+            // resume from here instead of replaying the whole turn.
+            callbacks.onSequence?.(parsed);
+        }
+    }
+
     const data = frame
         .split('\n')
         .filter((line) => line.startsWith('data:'))

@@ -46,7 +46,12 @@ class ConversationUsageService
     {
         $logs = AiInteractionLog::query()
             ->where('ai_conversation_id', $conversation->id)
-            ->where('status', AiInteractionStatus::Success->value)
+            // Aborted turns count too: the browser hanging up does not refund
+            // the tokens the provider already generated.
+            ->whereIn('status', [
+                AiInteractionStatus::Success->value,
+                AiInteractionStatus::Aborted->value,
+            ])
             ->where(function ($query): void {
                 $query->whereNotNull('input_tokens')
                     ->orWhereNotNull('output_tokens');

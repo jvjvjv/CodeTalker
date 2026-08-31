@@ -6,6 +6,7 @@ use Jvjvjv\CodeTalker\Console\Commands\BackfillAiSystemCapabilitiesCommand;
 use Jvjvjv\CodeTalker\Console\Commands\BackfillConversationUsageCommand;
 use Jvjvjv\CodeTalker\Console\Commands\CompleteIdleConversationsCommand;
 use Jvjvjv\CodeTalker\Console\Commands\PruneProviderExchangesCommand;
+use Jvjvjv\CodeTalker\Console\Commands\PruneTurnEventsCommand;
 use Jvjvjv\CodeTalker\Console\Commands\ReadProviderExchangeCommand;
 use Jvjvjv\CodeTalker\Console\Commands\SyncConversationUsageCommand;
 use Jvjvjv\CodeTalker\Jobs\BackfillConversationUsageJob;
@@ -198,6 +199,7 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 BackfillConversationUsageCommand::class,
                 SyncConversationUsageCommand::class,
                 PruneProviderExchangesCommand::class,
+                PruneTurnEventsCommand::class,
                 CompleteIdleConversationsCommand::class,
                 ReadProviderExchangeCommand::class,
             ]);
@@ -215,6 +217,10 @@ class CodeTalkerServiceProvider extends ServiceProvider
 
             Schedule::command('ai:prune-provider-exchanges')
                 ->dailyAt('03:00')
+                ->withoutOverlapping();
+
+            Schedule::command('ai:prune-turn-events')
+                ->dailyAt('03:15')
                 ->withoutOverlapping();
 
             Schedule::command('ai:complete-idle-conversations')

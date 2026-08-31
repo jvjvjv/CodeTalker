@@ -21,7 +21,7 @@ class ChatBotPresenter
      * The visible transcript: everything except the system prompt, which is
      * instructions rather than something anyone said.
      *
-     * @return array<int, array{role: string, content: ?string, reasoning_content: ?string, blocks: ?array}>
+     * @return array<int, array{role: string, content: ?string, reasoning_content: ?string, blocks: ?array, incomplete: bool}>
      */
     public function transcript(?AiConversation $conversation): array
     {
@@ -39,6 +39,11 @@ class ChatBotPresenter
                 'content' => $message->content,
                 'reasoning_content' => $message->reasoning_content,
                 'blocks' => $message->blocks,
+                // A reply the model never finished — the browser hung up, or
+                // the duration guard cut it off. Its content, if any, stops
+                // mid-sentence; render it as interrupted rather than as an
+                // answer.
+                'incomplete' => (bool) ($message->metadata['incomplete'] ?? false),
             ])
             ->all();
     }

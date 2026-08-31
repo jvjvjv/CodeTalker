@@ -9,6 +9,7 @@ use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AiSystemProviderConfigurator;
 use Jvjvjv\CodeTalker\Services\LaravelAi\CodeTalkerAgent;
 use Jvjvjv\CodeTalker\Services\LaravelAi\StreamTranslator;
+use Jvjvjv\CodeTalker\Services\LaravelAi\Streaming\Heartbeat;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeContext;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeFrame;
 use Laravel\Ai\Messages\AssistantMessage;
@@ -136,16 +137,25 @@ class ConversationTurnRunner
                         break;
                     }
 
-                    Log::debug('Chat bot API stream event', [
-                        'conversation_id' => $conversation->id,
-                        'ai_persona_id' => $conversation->ai_persona_id,
-                        'ai_system_id' => $conversation->ai_system_id,
-                        'turn_number' => $turnNumber,
-                        'attempt' => $attempt,
-                        'event_type' => class_basename($event),
-                    ]);
+                    // A tick, not model output. It is deliberately not logged
+                    // and not appended to $events — a turn with minute-long
+                    // gaps would otherwise fill response_data with hundreds of
+                    // them — and it deliberately does not reset the step
+                    // clock, which would put the duration guard out of reach.
+                    $isHeartbeat = $event instanceof Heartbeat;
 
-                    $events[] = $event;
+                    if (! $isHeartbeat) {
+                        Log::debug('Chat bot API stream event', [
+                            'conversation_id' => $conversation->id,
+                            'ai_persona_id' => $conversation->ai_persona_id,
+                            'ai_system_id' => $conversation->ai_system_id,
+                            'turn_number' => $turnNumber,
+                            'attempt' => $attempt,
+                            'event_type' => class_basename($event),
+                        ]);
+
+                        $events[] = $event;
+                    }
 
                     if ($event instanceof ToolResultEvent) {
                         $recordedToolResults[] = $event->toolResult->toArray();
@@ -202,6 +212,12 @@ class ConversationTurnRunner
                         $maxDurationMessage = "The response exceeded the maximum stream duration of {$maxStreamSeconds}s and was aborted.";
 
                         break;
+                    }
+
+                    if ($isHeartbeat) {
+                        yield ['type' => 'heartbeat'];
+
+                        continue;
                     }
 
                     if ($event instanceof ToolCallEvent) {

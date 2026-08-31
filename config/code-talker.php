@@ -103,6 +103,14 @@ return [
     'conversations' => [
         'idle_timeout_minutes' => (int) env('CODE_TALKER_CONVERSATION_IDLE_MINUTES', 30),
 
+        // Seconds of provider silence before the turn emits a heartbeat.
+        // Two things depend on it: intermediaries stop timing out during a
+        // long gap, and PHP only flips connection_aborted() after a write to
+        // a dead socket — so without a heartbeat an abandoned turn keeps
+        // generating until the model's next event, which on a large context
+        // can be minutes. Set to 0 to disable.
+        'heartbeat_seconds' => (int) env('CODE_TALKER_HEARTBEAT_SECONDS', 5),
+
         // Wall-clock ceiling (seconds) for a single streamed chat turn, across
         // all tool steps and continuation attempts. Guards against a runaway
         // generation — e.g. a reasoning model that loops until it overflows the
@@ -329,6 +337,27 @@ return [
         'enabled' => env('CODE_TALKER_RAW_EXCHANGES_ENABLED', true),
         'providers' => env('CODE_TALKER_RAW_EXCHANGES_PROVIDERS', 'lm-studio'),
         'retention_days' => (int) env('CODE_TALKER_RAW_EXCHANGES_RETENTION_DAYS', 14),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Detached Turns
+    |--------------------------------------------------------------------------
+    |
+    | A turn dispatched with AiPersonaConversationService::dispatchTurn() runs
+    | as a queued job and writes its events to ai_turn_events, so a browser
+    | reload resumes the turn instead of killing it. connection_aborted() is
+    | meaningless in a worker, so "nobody has polled for abandon_after_seconds"
+    | is what stops a turn nobody is waiting for.
+    |
+    */
+
+    'turns' => [
+        'queue' => env('CODE_TALKER_TURN_QUEUE'),
+        'abandon_after_seconds' => (int) env('CODE_TALKER_TURN_ABANDON_SECONDS', 30),
+        'poll_interval_ms' => (int) env('CODE_TALKER_TURN_POLL_MS', 250),
+        'max_stream_seconds' => (int) env('CODE_TALKER_TURN_MAX_STREAM_SECONDS', 900),
+        'retention_days' => (int) env('CODE_TALKER_TURN_RETENTION_DAYS', 7),
     ],
 
 ];

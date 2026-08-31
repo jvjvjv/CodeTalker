@@ -3,6 +3,8 @@
 namespace Jvjvjv\CodeTalker\Services\LaravelAi;
 
 use Generator;
+use Jvjvjv\CodeTalker\Services\LaravelAi\Concerns\HeartbeatsIdleSseReads;
+use Jvjvjv\CodeTalker\Services\LaravelAi\Streaming\Heartbeat;
 use Laravel\Ai\Contracts\Providers\TextProvider;
 use Laravel\Ai\Gateway\OpenAiCompatible\OpenAiCompatibleGateway;
 use Laravel\Ai\Gateway\StepContext;
@@ -39,6 +41,8 @@ use Laravel\Ai\Streaming\Events\ToolCall as ToolCallEvent;
  */
 class ReasoningOpenAiCompatibleGateway extends OpenAiCompatibleGateway
 {
+    use HeartbeatsIdleSseReads;
+
     /**
      * Stream text for a single Chat Completions step.
      *
@@ -103,6 +107,14 @@ class ReasoningOpenAiCompatibleGateway extends OpenAiCompatibleGateway
         $responseModel = $model;
 
         foreach ($this->parseServerSentEvents($streamBody) as $data) {
+            // A tick, not model output: forward it and read on. Everything
+            // below this line assumes $data is a decoded provider frame.
+            if ($data instanceof Heartbeat) {
+                yield $data->withInvocationId($invocationId);
+
+                continue;
+            }
+
             // OpenAI-shaped errors nest under an "error" key. LM Studio's own
             // engine-level failures (e.g. "context size exceeded") instead
             // arrive as a flat frame — {"code", "message", "type"} with no

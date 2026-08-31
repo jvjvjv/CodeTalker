@@ -6,6 +6,7 @@ use GuzzleHttp\Psr7\Utils;
 use Illuminate\Contracts\Events\Dispatcher;
 use Jvjvjv\CodeTalker\Services\LaravelAi\ReasoningOpenAiCompatibleGateway;
 use Jvjvjv\CodeTalker\Services\LaravelAi\ReasoningOpenAiCompatibleProvider;
+use Jvjvjv\CodeTalker\Services\LaravelAi\Streaming\Heartbeat;
 use Jvjvjv\CodeTalker\Tests\TestCase;
 use Laravel\Ai\AiManager;
 use Laravel\Ai\Streaming\Events\Error as ErrorEvent;
@@ -135,5 +136,91 @@ class ReasoningOpenAiCompatibleGatewayTest extends TestCase
         $provider = $this->app->make(AiManager::class)->textProvider('code-talker-test');
 
         $this->assertInstanceOf(ReasoningOpenAiCompatibleProvider::class, $provider);
+    }
+
+    /**
+     * A gateway exposing the protected SSE parser, so a test can drive the
+     * generator one step at a time. Stepping matters: the generator suspends on
+     * each yield, which is what lets a single-threaded test write the second
+     * half of a frame *after* observing the heartbeat for the gap.
+     */
+    private function parsingGateway(): object
+    {
+        return new class($this->app->make(Dispatcher::class)) extends ReasoningOpenAiCompatibleGateway
+        {
+            public function parse($body): \Generator
+            {
+                return $this->parseServerSentEvents($body);
+            }
+        };
+    }
+
+    public function test_an_idle_gap_yields_a_heartbeat_without_losing_the_frame_that_spans_it(): void
+    {
+        config()->set('code-talker.conversations.heartbeat_seconds', 1);
+
+        [$readEnd, $writeEnd] = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, 0);
+
+        // Half a frame, then silence — exactly the shape that used to be lost.
+        fwrite($writeEnd, 'data: {"choices":[{"delta":{"con');
+
+        $events = $this->parsingGateway()->parse(Utils::streamFor($readEnd));
+
+        // Runs until the first yield: the read times out and reports a beat.
+        $events->rewind();
+        $this->assertInstanceOf(Heartbeat::class, $events->current());
+        $this->assertSame('heartbeat', $events->current()->toArray()['type']);
+
+        // The rest of the frame arrives after the gap and must parse intact.
+        fwrite($writeEnd, 'tent":"Hello"}}]}' . "\n\n");
+
+        $events->next();
+        $this->assertSame(
+            [['delta' => ['content' => 'Hello']]],
+            $events->current()['choices'],
+        );
+
+        fclose($writeEnd);
+        $events->next();
+        $this->assertFalse($events->valid());
+    }
+
+    public function test_heartbeats_are_disabled_by_a_zero_interval(): void
+    {
+        config()->set('code-talker.conversations.heartbeat_seconds', 0);
+
+        $sse = 'data: {"choices":[{"delta":{"content":"Hi"}}]}' . "\n\n"
+            . 'data: [DONE]' . "\n\n";
+
+        $parsed = iterator_to_array($this->parsingGateway()->parse(Utils::streamFor($sse)), false);
+
+        $this->assertCount(1, $parsed);
+        $this->assertSame('Hi', $parsed[0]['choices'][0]['delta']['content']);
+    }
+
+    public function test_a_body_without_a_stream_resource_falls_back_to_the_parent_parser(): void
+    {
+        config()->set('code-talker.conversations.heartbeat_seconds', 1);
+
+        // A PumpStream has no underlying resource, so detaching it would leave
+        // nothing to read; the parser must delegate instead. The pump returns
+        // null once drained — PumpStream's contract for EOF; an empty string
+        // would never flip eof() and the parent parser would spin forever.
+        $body = new \GuzzleHttp\Psr7\PumpStream(function (): ?string {
+            static $sent = false;
+
+            if ($sent) {
+                return null;
+            }
+
+            $sent = true;
+
+            return 'data: {"choices":[{"delta":{"content":"Hi"}}]}' . "\n\n";
+        });
+
+        $parsed = iterator_to_array($this->parsingGateway()->parse($body), false);
+
+        $this->assertCount(1, $parsed);
+        $this->assertSame('Hi', $parsed[0]['choices'][0]['delta']['content']);
     }
 }

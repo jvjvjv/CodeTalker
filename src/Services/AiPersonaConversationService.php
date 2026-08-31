@@ -5,9 +5,13 @@ namespace Jvjvjv\CodeTalker\Services;
 use Generator;
 use RuntimeException;
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
+use Jvjvjv\CodeTalker\Jobs\RunConversationTurnJob;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
+use Jvjvjv\CodeTalker\Models\AiTurnRun;
+use Jvjvjv\CodeTalker\Services\Conversation\TurnEventStream;
+use Jvjvjv\CodeTalker\Services\Conversation\TurnRunStore;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\ConversationTitle;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\ConversationTurnRunner;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\RequestPayloadBuilder;
@@ -245,6 +249,62 @@ class AiPersonaConversationService
                 'reason' => 'provider_error',
             ];
         }
+    }
+
+    /**
+     * Run a turn detached from the caller's connection.
+     *
+     * The turn becomes a queued job that writes its events to a store; the
+     * browser reads them with resumeTurn() and can reconnect at any point. Use
+     * this instead of continueConversation() when a turn is long enough that a
+     * reload or a flaky connection should not destroy it.
+     *
+     * The store and reader are resolved here rather than injected: this
+     * service's five-argument constructor is depended on by host apps and by
+     * tests that subclass it, so collaborators are built from what it has.
+     */
+    public function dispatchTurn(AiConversation $conversation, string $message): AiTurnRun
+    {
+        $run = app(TurnRunStore::class)->open($conversation, $message);
+
+        // afterCommit(): a host may wrap this call in its own transaction, and
+        // with a Redis/SQS queue a worker could pick the job up before the run
+        // row commits — the job would find nothing and return, leaving the run
+        // Queued while a reader polls heartbeats until the stream ceiling.
+        // With no transaction open the job dispatches immediately, so this is
+        // safe unconditionally.
+        RunConversationTurnJob::dispatch($run->id)->afterCommit();
+
+        return $run;
+    }
+
+    /**
+     * Stream a dispatched turn's events, starting after the given sequence.
+     *
+     * Yields the turn's stored events — the shapes continueConversation()
+     * produces — each carrying a `_seq` the encoder turns into an SSE id, plus
+     * events the stream synthesizes while waiting on the store: a `heartbeat`
+     * per beat of silence, and a `max_stream_duration` error at the reader
+     * ceiling. Synthesized events are never stored and carry no `_seq`, so
+     * read that key conditionally. A browser that reconnects passes back the
+     * last sequence it saw and misses nothing in between.
+     *
+     * @return Generator<int, array<string, mixed>>
+     */
+    public function resumeTurn(AiTurnRun $run, int $after = 0): Generator
+    {
+        yield from app(TurnEventStream::class)->stream($run, $after);
+    }
+
+    /**
+     * Ask a running turn to stop.
+     *
+     * The worker notices within a couple of seconds and stops generating;
+     * whatever the turn produced by then is persisted and flagged incomplete.
+     */
+    public function cancelTurn(AiTurnRun $run): void
+    {
+        app(TurnRunStore::class)->requestCancel($run);
     }
 
     /**

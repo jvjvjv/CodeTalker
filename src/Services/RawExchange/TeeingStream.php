@@ -28,6 +28,20 @@ class TeeingStream implements StreamInterface
     ) {
     }
 
+    /**
+     * Record bytes a consumer read from the underlying resource directly.
+     *
+     * The heartbeat SSE reader detaches the resource so it can fread() with a
+     * stream timeout — those reads never pass through read() above, so the
+     * reader feeds the tee itself. Flushing still happens on close/destruct.
+     */
+    public function record(string $bytes): void
+    {
+        if ($bytes !== '') {
+            $this->buffer .= $bytes;
+        }
+    }
+
     public function read($length): string
     {
         $data = $this->stream->read($length);
