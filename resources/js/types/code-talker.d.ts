@@ -129,6 +129,13 @@ export interface PageReloadEvent {
  * which never arrives as a message — so a wire consumer cannot receive one and
  * should not be made to handle it. A host consuming the events directly,
  * without the SSE encoding, will see `{ type: 'heartbeat' }`.
+ *
+ * A turn dispatched with `dispatchTurn()` frames each stored event with an SSE
+ * `id:` line carrying its sequence — present only on that path, never for
+ * `continueConversation()`. The published client's `ChatTurnCallbacks` reports
+ * it through `onSequence?: (sequence: number) => void`: the sequence of the
+ * last event received, to pass back as `after` when reconnecting so the turn
+ * resumes rather than replays.
  */
 
 /** Every event the message endpoint emits, discriminated on `type`. */

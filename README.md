@@ -149,6 +149,34 @@ Every laravel/ai HTTP request/response can be captured verbatim into the
 Request bodies and response bytes are stored, but request **headers are never
 recorded**, so provider API keys are not persisted.
 
+### Detached Turns
+
+A turn dispatched with `dispatchTurn()` runs as a queued job and writes its
+events to the `ai_turn_events` table, so a browser reload resumes it instead of
+killing it (see [Running a turn as a job](#running-a-turn-as-a-job)).
+
+```php
+'turns' => [
+    'queue' => env('CODE_TALKER_TURN_QUEUE'),
+    'abandon_after_seconds' => (int) env('CODE_TALKER_TURN_ABANDON_SECONDS', 30),
+    'poll_interval_ms' => (int) env('CODE_TALKER_TURN_POLL_MS', 250),
+    'max_stream_seconds' => (int) env('CODE_TALKER_TURN_MAX_STREAM_SECONDS', 900),
+    'retention_days' => (int) env('CODE_TALKER_TURN_RETENTION_DAYS', 7),
+],
+```
+
+- `queue` — the queue `RunConversationTurnJob` is dispatched on; `null` uses
+  the default queue.
+- `abandon_after_seconds` — a running turn stops when nobody has read its
+  events for this long. `connection_aborted()` reports 0 in a worker, so this
+  is what stops a turn nobody is waiting for.
+- `poll_interval_ms` — how often a reader polls the store for new events.
+- `max_stream_seconds` — ceiling for a single `resumeTurn()` read before it
+  ends with a `max_stream_duration` error; reconnecting starts a fresh window.
+- `retention_days` — finished runs older than this are removed by
+  `php artisan ai:prune-turn-events`, scheduled daily at 03:15 (respects the
+  `schedule` flag).
+
 ### Troubleshooting
 
 **`Provider is unavailable: HTTP request returned status code 404`** — returned
@@ -419,6 +447,38 @@ duration guard tripped — is still recorded, whatever it had produced:
   hung up on, with `provider_metadata.error_reason` set to `client_aborted`.
   The tokens it burned still count towards the conversation's usage totals —
   hanging up does not refund what the provider already generated.
+
+### Running a turn as a job
+
+`continueConversation()` ties the turn to the caller's connection: close the
+tab and the turn stops, reload and it is gone. For turns long enough that this
+matters, dispatch the turn instead and stream it from its store.
+
+```php
+// Start it. Returns an AiTurnRun; `public_id` is the handle to put in a URL.
+$run = $chat->dispatchTurn($conversation, $request->string('message'));
+
+// Stream it — from the start, or from wherever the browser left off.
+foreach ($encoder->encode($chat->resumeTurn($run, $after)) as $frame) {
+    echo $frame;
+    ob_get_level() > 0 && ob_flush();
+    flush();
+}
+
+// Stop it early.
+$chat->cancelTurn($run);
+```
+
+Each event is framed with an SSE `id:` carrying its sequence. A browser that
+reconnects passes the last sequence it saw back as `after`, and the turn
+resumes rather than replaying. The published client reports it via
+`onSequence`.
+
+A dispatched turn needs a queue worker. Because `connection_aborted()` reports
+0 in a worker, a run stops when nobody has read it for
+`turns.abandon_after_seconds` (default 30) — so closing the tab still stops
+generation, and a reload inside that window reattaches to the same run.
+`ai:prune-turn-events` clears finished runs past `turns.retention_days`.
 
 ### Resolving conversations across requests
 
@@ -1001,13 +1061,14 @@ route file, and defaults to `['web', 'auth', 'can:manage-ai-tools']`.
 
 ## Scheduled Jobs
 
-The package registers four jobs automatically (requires Laravel's scheduler to be running):
+The package registers five jobs automatically (requires Laravel's scheduler to be running):
 
 | Job                              | Schedule                   | Description                                             |
 | -------------------------------- | -------------------------- | ------------------------------------------------------- |
 | `ai:sync-conversation-usage`     | Twice daily (00:00, 12:00) | Syncs token counts and cost to `AiConversation`         |
 | `BackfillConversationUsageJob`   | Daily at 02:30             | Backfills usage for conversations missing cost data     |
 | `ai:prune-provider-exchanges`    | Daily at 03:00             | Removes `ai_provider_exchanges` rows past retention     |
+| `ai:prune-turn-events`           | Daily at 03:15             | Removes finished turn runs past `turns.retention_days`  |
 | `ai:complete-idle-conversations` | Every 15 minutes           | Completes idle conversations, triggering memory extract |
 
 Disable automatic scheduling in config and register manually if needed:
@@ -1034,6 +1095,9 @@ php artisan ai:sync-conversation-usage
 
 # Delete ai_provider_exchanges rows older than raw_exchanges.retention_days
 php artisan ai:prune-provider-exchanges
+
+# Delete finished turn runs (and their events) older than turns.retention_days
+php artisan ai:prune-turn-events
 
 # Mark idle conversations Completed, triggering memory extraction
 php artisan ai:complete-idle-conversations
