@@ -53,6 +53,11 @@ class TurnRunStore
     }
 
     /**
+     * Single-writer contract: sequences come from an in-memory counter seeded
+     * by markRunning(), so exactly one store instance may write a given run.
+     * Concurrent writers collide on the unique (ai_turn_run_id, sequence)
+     * index and throw rather than silently corrupting a reader's replay.
+     *
      * @param array<string, mixed> $event
      */
     public function append(AiTurnRun $run, array $event): int
