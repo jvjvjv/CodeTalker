@@ -345,7 +345,7 @@ Every event carries a `type`. These are typed in the published declarations.
 | `message_start`         | —                                                            |
 | `content_block_delta`   | `delta.text`                                                 |
 | `reasoning_block_delta` | `delta.reasoning`                                            |
-| `message_delta`         | `delta.stop_reason`, `usage`                                 |
+| `message_delta`         | `delta.stop_reason` (`end_turn`/`max_tokens`/`tool_use`/`incomplete`), `usage` |
 | `message_stop`          | —                                                            |
 | `tool_use_progress`     | `text` (always `""`), `tools` (one tool name per event), plus `input`/`output`/`successful` when tool payloads are enabled |
 | `page_reload`           | —                                                             |
@@ -356,6 +356,11 @@ provider `ToolCall`/`ToolResult` events are never forwarded (their payloads
 aren't display text), so without this a turn calling a tool, especially one
 retrying after an error, streams nothing but silence between text/reasoning
 deltas.
+
+`stop_reason` is `incomplete` when the turn never finished — the connection
+dropped, or the server's duration guard cut the generation off. Whatever
+content arrived stops mid-answer, and the turn is stored that way (see
+[Interrupted turns](#interrupted-turns)).
 
 `page_reload` fires when a tool's structured result carries `_page_reload:
 true` — see [Tool Registration](#tool-registration) for how a tool sets it.
@@ -386,6 +391,25 @@ $chat->usingCancellationCheck(fn (): bool => $job->isReleased())
      ->continueConversation($conversation, $message);
 ```
 
+### Interrupted turns
+
+A turn that stops before the model finishes — the browser hung up, or the
+duration guard tripped — is still recorded, whatever it had produced:
+
+- The assistant message is persisted even when it holds no text at all, so a
+  user's question is never left with nothing beneath it. Its `metadata` carries
+  `incomplete: true` and an `incomplete_reason` of `client_aborted` or
+  `max_stream_duration`, and `ChatBotPresenter::transcript()` surfaces the flag
+  as `incomplete` on the row. Render it as an interrupted reply rather than as
+  an answer.
+- Tool calls the model made before the stop are persisted with it. A tool that
+  ran changed state on your side; dropping the turn would leave the next turn's
+  history with no record it ever happened.
+- `AiInteractionLog::status` is `aborted` (not `success`) for a turn the caller
+  hung up on, with `provider_metadata.error_reason` set to `client_aborted`.
+  The tokens it burned still count towards the conversation's usage totals —
+  hanging up does not refund what the provider already generated.
+
 ### Resolving conversations across requests
 
 The package used to keep this in the session and a cookie. It no longer does —
@@ -399,6 +423,7 @@ and `$conversation->chat_hash` is a stable shareable handle that
 
 ```php
 $presenter->transcript($conversation);              // visible messages, system prompt excluded
+                                                    // each row carries `incomplete` — see Interrupted turns
 $presenter->totalCostUsd($persona);                 // lifetime cost for a persona
 $presenter->conversationsFor($user, $personas);     // an authenticated user's conversations
 ```

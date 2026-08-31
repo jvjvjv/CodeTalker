@@ -30,6 +30,12 @@ class StreamTranslator
 
     private ?string $lastReason = null;
 
+    /**
+     * Whether a provider request is open — a StreamStart has arrived without
+     * its StreamEnd. True at the moment a turn is cut off mid-generation.
+     */
+    private bool $streamOpen = false;
+
     private Usage $usage;
 
     public function __construct()
@@ -71,11 +77,15 @@ class StreamTranslator
      */
     public function finish(): array
     {
+        // Read before the synthetic message_start below, which opens a stream
+        // that no StreamEnd will ever close.
+        $stopReason = $this->stopReason();
+
         $events = $this->messageStarted ? [] : $this->onStreamStart();
 
         $events[] = [
             'type' => 'message_delta',
-            'delta' => ['stop_reason' => $this->stopReason()],
+            'delta' => ['stop_reason' => $stopReason],
             'usage' => [
                 'input_tokens' => $this->inputTokens() ?: null,
                 'output_tokens' => $this->outputTokens() ?: null,
@@ -89,9 +99,18 @@ class StreamTranslator
 
     /**
      * The last finish reason mapped to the legacy Anthropic-style stop_reason.
+     *
+     * A turn that never saw a StreamEnd — the browser hung up, or the duration
+     * guard cut the generation off — reports 'incomplete'. It used to fall
+     * through to 'end_turn', which made a truncated turn indistinguishable
+     * from a clean one everywhere the reason is recorded.
      */
     public function stopReason(): string
     {
+        if ($this->streamOpen || $this->lastReason === null) {
+            return 'incomplete';
+        }
+
         return match ($this->lastReason) {
             'tool_calls' => 'tool_use',
             'length' => 'max_tokens',
@@ -122,6 +141,11 @@ class StreamTranslator
      */
     private function onStreamStart(): array
     {
+        // Set before the message_start guard below: the agentic loop opens one
+        // provider request per step, and only the first of them emits a
+        // browser-visible message_start.
+        $this->streamOpen = true;
+
         if ($this->messageStarted) {
             return [];
         }
@@ -145,6 +169,7 @@ class StreamTranslator
     {
         $this->usage = $this->usage->add($event->usage);
         $this->lastReason = $event->reason;
+        $this->streamOpen = false;
 
         return [];
     }

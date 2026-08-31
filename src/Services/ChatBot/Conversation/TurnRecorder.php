@@ -35,12 +35,21 @@ class TurnRecorder
     ): void {
         $text = $blocks->text();
         $reasoning = $blocks->reasoning();
+        $incompleteReason = $this->incompleteReason($outcome);
 
-        // Persist whatever was produced even when the turn was cut off by
-        // the max-duration guard — including reasoning-only content, so a
-        // model stuck deliberating without ever answering doesn't vanish
-        // without a trace.
-        if ($text !== '' || $reasoning !== '') {
+        // Persist whatever the turn produced, and record the turn itself even
+        // when it produced nothing visible.
+        //
+        // A turn cut short still happened: its tool calls changed state on the
+        // host's side, and the user is owed something other than silence under
+        // their question. Writing only when there was text or reasoning meant a
+        // turn abandoned during prompt processing — which, on a large context,
+        // is where most of a turn's wall-clock time goes — vanished entirely,
+        // leaving a user message with no reply beneath it and no record that
+        // anything had ever run.
+        $producedSomething = $text !== '' || $reasoning !== '' || $outcome->toolCalls !== [];
+
+        if ($producedSomething || $incompleteReason !== null) {
             AiConversationMessage::create([
                 'ai_conversation_id' => $conversation->id,
                 'role' => 'assistant',
@@ -61,6 +70,12 @@ class TurnRecorder
                     'input_tokens' => $inputTokens ?: null,
                     'output_tokens' => $outputTokens ?: null,
                     'model' => $conversation->aiSystem->model,
+                    // The flag a host renders "this reply was interrupted"
+                    // from. Always present, so a host can read it without
+                    // having to distinguish "complete" from "stored before
+                    // this existed".
+                    'incomplete' => $incompleteReason !== null,
+                    'incomplete_reason' => $incompleteReason,
                 ],
             ]);
         }
@@ -82,17 +97,38 @@ class TurnRecorder
             'input_token_price_snapshot' => $pricingSnapshot['input_token_price_snapshot'],
             'output_token_price_snapshot' => $pricingSnapshot['output_token_price_snapshot'],
             'duration_ms' => $outcome->durationMs,
-            'status' => $outcome->maxDurationExceeded ? AiInteractionStatus::Error : AiInteractionStatus::Success,
+            // A turn that was cut short is never logged as a success: doing so
+            // made a truncated turn indistinguishable from a clean one in
+            // every dashboard the logs feed.
+            'status' => match (true) {
+                $outcome->maxDurationExceeded => AiInteractionStatus::Error,
+                $outcome->clientAborted => AiInteractionStatus::Aborted,
+                default => AiInteractionStatus::Success,
+            },
         ];
 
         if ($outcome->maxDurationExceeded) {
             $log['error_message'] = $outcome->maxDurationMessage;
             $log['provider_metadata'] = ['error_reason' => 'max_stream_duration'];
+        } elseif ($outcome->clientAborted) {
+            $log['provider_metadata'] = ['error_reason' => 'client_aborted'];
         }
 
         AiInteractionLog::create($log);
 
         $this->conversationUsageService->syncConversation($conversation->fresh());
+    }
+
+    /**
+     * Why the turn stopped short, or null if it ran to completion.
+     */
+    private function incompleteReason(TurnOutcome $outcome): ?string
+    {
+        return match (true) {
+            $outcome->maxDurationExceeded => 'max_stream_duration',
+            $outcome->clientAborted => 'client_aborted',
+            default => null,
+        };
     }
 
     /**

@@ -85,6 +85,38 @@ class StreamTranslatorTest extends TestCase
         $this->assertSame('length', $lengthTranslator->lastReason());
     }
 
+    public function test_stop_reason_is_incomplete_when_no_stream_end_was_ever_seen(): void
+    {
+        $translator = new StreamTranslator();
+
+        // A turn cut off before the provider finished — the browser hung up,
+        // or the duration guard tripped. Reporting 'end_turn' here made a
+        // truncated turn indistinguishable from a clean one in the logs.
+        $this->assertSame('incomplete', $translator->stopReason());
+
+        $translator->translate($this->streamStart());
+        $translator->translate(new TextDelta('e1', 'm1', 'I', time()));
+
+        $this->assertSame('incomplete', $translator->stopReason());
+    }
+
+    public function test_stop_reason_is_incomplete_while_a_later_step_is_still_open(): void
+    {
+        $translator = new StreamTranslator();
+
+        $translator->translate($this->streamStart());
+        $translator->translate($this->streamEnd('tool_calls'));
+
+        $this->assertSame('tool_use', $translator->stopReason());
+
+        // The agentic loop opened another provider request that never ended:
+        // the turn as a whole did not complete, whatever the last finished
+        // step reported.
+        $translator->translate($this->streamStart());
+
+        $this->assertSame('incomplete', $translator->stopReason());
+    }
+
     public function test_finish_without_any_stream_start_still_emits_message_start_first(): void
     {
         $translator = new StreamTranslator();

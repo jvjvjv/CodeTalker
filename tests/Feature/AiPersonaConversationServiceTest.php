@@ -517,8 +517,14 @@ class AiPersonaConversationServiceTest extends TestCase
         $this->assertSame(1, AiLlmMessage::where('direction', 'response')->count());
 
         // Nothing streamed before the guard tripped on the very first event,
-        // so there is no content to preserve.
-        $this->assertNull(AiConversationMessage::where('role', 'assistant')->first());
+        // so there is no content to preserve — but the turn is still recorded,
+        // flagged as interrupted, rather than leaving the user's message with
+        // nothing beneath it.
+        $message = AiConversationMessage::where('role', 'assistant')->first();
+        $this->assertNotNull($message);
+        $this->assertSame('', $message->content);
+        $this->assertTrue($message->metadata['incomplete']);
+        $this->assertSame('max_stream_duration', $message->metadata['incomplete_reason']);
     }
 
     public function test_the_max_duration_guard_preserves_partial_reasoning_content(): void
@@ -653,48 +659,140 @@ class AiPersonaConversationServiceTest extends TestCase
         $this->assertGreaterThan(1, count(array_unique($service->seenStartedAt)));
     }
 
-    public function test_a_client_abort_stops_the_turn_and_persists_the_partial_response(): void
+    /**
+     * A service whose cancellation check fires once the given number of stream
+     * events has been consumed — the browser hanging up mid-turn, made
+     * deterministic. The guard is consulted at the top of each iteration, so
+     * `$events` events are processed before the loop breaks.
+     */
+    private function abortingAfter(int $events): AiPersonaConversationService
+    {
+        $checks = 0;
+
+        return $this->app->make(AiPersonaConversationService::class)
+            ->usingCancellationCheck(static function () use (&$checks, $events): bool {
+                return $checks++ >= $events;
+            });
+    }
+
+    public function test_a_client_abort_before_any_content_still_records_an_interrupted_message(): void
     {
         Queue::fake();
         CodeTalkerAgent::fake(['This turn is cancelled by the browser mid-stream']);
 
         $persona = $this->makePersona();
 
-        // Simulate the browser hanging up (Cancel button / ESC): the abort guard
-        // trips after the first stream event so a partial response is captured.
-        $service = new class(
-            $this->app->make(AgentFactory::class),
-            $this->app->make(AiMemoryService::class),
-            $this->app->make(ConversationUsageService::class),
-            $this->app->make(RawExchangeContext::class),
-            $this->app->make(AiSystemProviderConfigurator::class),
-        ) extends AiPersonaConversationService {
-            private int $checks = 0;
-
-            protected function clientAborted(): bool
-            {
-                return $this->checks++ > 0;
-            }
-        };
+        // Abort with only the StreamStart consumed: the model was still
+        // processing the prompt and had emitted nothing. This used to persist
+        // nothing at all, so the user's message sat in the transcript with no
+        // reply beneath it and no record that a turn had ever run.
+        $service = $this->abortingAfter(1);
 
         $conversation = $service->startConversation($persona);
         $events = $this->drainAndDecode($service->continueConversation($conversation, 'Hi'));
 
-        // A client abort is a clean stop, not a failure: no error event is emitted.
+        // A client abort is a clean stop, not a provider failure: no error
+        // event is emitted (and by then the browser is gone anyway).
         $this->assertNull(collect($events)->firstWhere('type', 'error'));
-
-        // The turn is still recorded (request + partial response), and the
-        // interaction log is not marked as an error.
-        $this->assertSame(1, AiLlmMessage::where('direction', 'response')->count());
-
-        $log = AiInteractionLog::first();
-        $this->assertNotNull($log);
-        $this->assertSame('success', $log->status->value);
 
         // Only one attempt runs — the abort short-circuits any continuation loop.
         $this->assertSame(1, AiLlmMessage::where('direction', 'request')->count());
+        $this->assertSame(1, AiLlmMessage::where('direction', 'response')->count());
+
+        // The turn never finished, so it is not reported as one that did.
+        $response = AiLlmMessage::where('direction', 'response')->first();
+        $this->assertSame('incomplete', $response->response_data['stop_reason']);
+
+        $log = AiInteractionLog::first();
+        $this->assertNotNull($log);
+        $this->assertSame('aborted', $log->status->value);
+        $this->assertSame('client_aborted', $log->provider_metadata['error_reason']);
+
+        // The interrupted reply is visible in the transcript, so the host can
+        // render "this reply was interrupted" instead of silence.
+        $message = AiConversationMessage::where('role', 'assistant')->first();
+        $this->assertNotNull($message);
+        $this->assertSame('', $message->content);
+        $this->assertTrue($message->metadata['incomplete']);
+        $this->assertSame('client_aborted', $message->metadata['incomplete_reason']);
 
         Queue::assertNotPushed(ProcessAiMemoryJob::class);
+    }
+
+    public function test_a_client_abort_after_a_tool_call_persists_the_tool_call(): void
+    {
+        Queue::fake();
+        Http::fake([
+            'https://example.com/page' => Http::response(
+                '<html><head><title>Hi</title></head><body><p>Body text.</p></body></html>',
+                200,
+                ['Content-Type' => 'text/html; charset=UTF-8'],
+            ),
+        ]);
+
+        CodeTalkerAgent::fake([
+            new ToolCall('tool-1', 'fetch-web-page', ['url' => 'https://example.com/page']),
+            'Summary after reading the page',
+        ]);
+
+        $persona = $this->makePersona(
+            ['allowed_tools' => ['fetch-web-page']],
+            ['tools_enabled' => true],
+        );
+
+        // Abort with StreamStart and the ToolCall consumed. The tool may well
+        // have run and changed state on the host's side; dropping the turn
+        // would leave the next turn's history with no record the call was ever
+        // made, and the model free to contradict itself about it.
+        $service = $this->abortingAfter(2);
+
+        $conversation = $service->startConversation($persona);
+        $this->drainAndDecode($service->continueConversation($conversation, 'Read the page'));
+
+        $message = AiConversationMessage::where('role', 'assistant')->first();
+        $this->assertNotNull($message);
+        $this->assertSame('', $message->content);
+        $this->assertSame('fetch-web-page', $message->tool_calls[0]['name']);
+        $this->assertTrue($message->metadata['incomplete']);
+
+        $this->assertSame('aborted', AiInteractionLog::first()->status->value);
+    }
+
+    public function test_a_client_abort_after_a_text_delta_persists_the_partial_text(): void
+    {
+        Queue::fake();
+        CodeTalkerAgent::fake(['This turn is cancelled by the browser mid-stream']);
+
+        $persona = $this->makePersona();
+
+        // StreamStart, TextStart, then the first TextDelta.
+        $service = $this->abortingAfter(3);
+
+        $conversation = $service->startConversation($persona);
+        $this->drainAndDecode($service->continueConversation($conversation, 'Hi'));
+
+        $message = AiConversationMessage::where('role', 'assistant')->first();
+        $this->assertNotNull($message);
+        $this->assertSame('This', $message->content);
+        $this->assertTrue($message->metadata['incomplete']);
+        $this->assertSame('client_aborted', $message->metadata['incomplete_reason']);
+    }
+
+    public function test_a_completed_turn_is_not_flagged_as_interrupted(): void
+    {
+        Queue::fake();
+        CodeTalkerAgent::fake(['All done here']);
+
+        $persona = $this->makePersona();
+        $service = $this->app->make(AiPersonaConversationService::class);
+
+        $conversation = $service->startConversation($persona);
+        $this->drainAndDecode($service->continueConversation($conversation, 'Hi'));
+
+        $message = AiConversationMessage::where('role', 'assistant')->first();
+        $this->assertSame('All done here', $message->content);
+        $this->assertFalse($message->metadata['incomplete']);
+        $this->assertSame('success', AiInteractionLog::first()->status->value);
     }
 
     public function test_a_non_recoverable_provider_error_event_fails_the_turn_instead_of_logging_success(): void

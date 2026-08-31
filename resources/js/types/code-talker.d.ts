@@ -32,14 +32,24 @@ export interface ChatMessage {
     reasoning_content: string | null;
     /** Ordered content runs; null on messages stored before blocks existed. */
     blocks: MessageBlock[] | null;
+    /**
+     * The reply was never finished — the browser hung up, or the server's
+     * duration guard cut it off. `content` may be empty or stop mid-sentence;
+     * render it as interrupted rather than as an answer.
+     */
+    incomplete: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Stream events
 // ---------------------------------------------------------------------------
 
-/** Why the turn stopped. */
-export type StopReason = 'end_turn' | 'max_tokens' | 'tool_use';
+/**
+ * Why the turn stopped. `incomplete` means the turn never finished — the
+ * connection dropped, or the server's duration guard cut the generation off —
+ * so whatever content arrived stops mid-answer.
+ */
+export type StopReason = 'end_turn' | 'max_tokens' | 'tool_use' | 'incomplete';
 
 /**
  * Why the turn failed. Absent for a recoverable in-stream provider error and

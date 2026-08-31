@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.15.0] — 2026-08-31
+
+A turn cut short is no longer thrown away. Whatever it produced is persisted and
+marked incomplete, and it is no longer logged as a clean success.
+
+### Breaking Changes
+- `ai_interaction_logs.status` has a new value, `aborted` (`AiInteractionStatus::Aborted`), used for a turn whose caller hung up mid-stream. It was previously recorded as `success`. Code matching exhaustively on the enum must handle the new case, and dashboards that count everything other than `success` as a failure will now count cancellations among them. The tokens an aborted turn burned still count towards conversation usage totals.
+- The `message_delta` event's `delta.stop_reason` has a new value, `incomplete`, for a turn that never finished — the caller hung up, or the max-stream-duration guard cut the generation off. Such turns previously reported `end_turn`, which was indistinguishable from a clean finish. The same value is stored on `ai_llm_messages.response_data.stop_reason`.
+- An interrupted turn now leaves an assistant message in the transcript even when it produced no text, so `ChatBotPresenter::transcript()` can return assistant rows whose `content` is empty. Each row carries a new `incomplete` boolean; render a flagged row as an interrupted reply rather than as a blank answer.
+
+### New Features
+- An interrupted assistant message records why in its `metadata`: `incomplete` plus an `incomplete_reason` of `client_aborted` or `max_stream_duration`.
+
+### Bug Fixes
+- A turn interrupted before the model emitted any text is no longer discarded entirely. It previously left the user's message in the transcript with no reply beneath it and no record that a turn had ever run — the failure mode was most visible with a large context, where a model can spend minutes processing the prompt before its first token.
+- Tool calls an interrupted turn already made are now persisted with it. They were dropped along with the rest of the turn, leaving the next turn's history with no record that a tool had run and changed state.
+
+### Known Issues
+- An abandoned connection is only noticed on the next write to it, so a turn with long silent gaps between provider events can keep generating for the length of one gap after the browser has gone.
+
 ## [0.14.1] — 2026-08-30
 
 ### New Features
