@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.16.0] — 2026-09-23
+
+An `AiSystem` can now use tools hosted on external MCP servers, granted by name
+alongside the package's own tools.
+
+### Breaking Changes
+- Two new migrations (`ai_mcp_servers`, `ai_mcp_server_tools`) ship with this release. Re-publish migrations and run them, even if you do not use remote MCP servers — `ai:sync-mcp-servers` is scheduled by default and expects the tables.
+
+### New Features
+- Added remote MCP servers: define an `AiMcpServer` and each of its tools becomes available as `{slug}__{tool}` (e.g. `mdn__search`), with its real input schema, granted through `AiSystem::allowed_tools` like any local tool. Only tools you name are offered; a tool added to the server later is not granted until you add it, and a local tool with the same name wins.
+- Added `Services/Management/AiMcpServerManager` (create/update/delete/list/sync, static `rules()`). Creating or updating a server syncs its tool catalog and returns the sync report; a failed sync is reported and recorded on the server, never thrown. A server's `slug` is immutable, and `delete()` returns the number of systems that had granted one of its tools.
+- A server's tool catalog is stored at sync time, so turns, operator runs and "available tools" listings never contact the server to discover tools — a down server does not delay a turn.
+- Remote server auth supports `none`, `bearer`, custom `headers`, and OAuth `client_credentials` (token cached until near expiry, refreshed once on rejection, endpoint discovered from OAuth metadata when `token_endpoint` is omitted). Credentials are stored encrypted and never returned by `list()`. The conversation's user and visitor identity is never sent to a remote server.
+- A failing remote server no longer ends the turn: an unreachable server, timeout, malformed response, or error result becomes a tool error the model can read, and after a connection failure or timeout the rest of that turn's calls to the same server fail immediately. A tool whose schema cannot be converted is stored but not offered, and `list()` shows it as unavailable with the reason.
+- Added `ai:sync-mcp-servers [slug]`, scheduled daily at 03:30, which refreshes stored catalogs and exits non-zero if any server fails to sync.
+- Added the `RemoteMcpToolDefinitionChanged` event, dispatched when a re-sync finds a tool's description or schema changed. The new definition takes effect immediately.
+- Added `remote_mcp.enabled` (master switch, default `true`), `remote_mcp.default_timeout_seconds` (default `10`) and `remote_mcp.max_timeout_seconds` (default `30`) config keys.
+
+### Known Issues
+- Only the HTTP transport is supported for remote servers; stdio servers and interactive (authorization-code) OAuth are not.
+- No heartbeat is sent while a remote tool call is in progress. Keep `remote_mcp.max_timeout_seconds` low when serving turns over a synchronous stream; dispatched turns are unaffected.
+
 ## [0.15.0] — 2026-08-31
 
 A turn cut short is no longer thrown away. Whatever it produced is persisted and
