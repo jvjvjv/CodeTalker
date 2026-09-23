@@ -93,6 +93,9 @@ row from your current version up to your target, in order.
 | `feature_keys`                       | `[]`                                     | Valid feature keys for system defaults; empty accepts any string |
 | `schedule`                           | `true`                                   | Set to `false` to disable the package's automatic scheduled jobs |
 | `conversations.idle_timeout_minutes` | `30`                                     | Inactivity before a conversation is marked `Completed`           |
+| `remote_mcp.enabled`                 | `true`                                   | Set to `false` to withdraw every [remote MCP tool](#remote-mcp-servers) |
+| `remote_mcp.default_timeout_seconds` | `10`                                     | Per-call timeout for a remote MCP server that sets none          |
+| `remote_mcp.max_timeout_seconds`     | `30`                                     | Cap on any remote MCP server's timeout                           |
 
 ### Suggested host-app packages
 
@@ -906,6 +909,92 @@ CodeTalkerServiceProvider::registerToolParameterResolver(
 
 The resolver is called once per `ChatBotToolRegistry` instantiation, and its return values are passed as `makeWith()` overrides when tools are resolved from the container.
 
+### Remote MCP servers
+
+An `AiSystem` can also use tools hosted on an external MCP server (MDN's
+documentation server, say). Each remote tool shows up as a separate tool with
+its real input schema, and is granted by name in `allowed_tools` like any
+local tool.
+
+Define the server through `AiMcpServerManager`:
+
+```php
+use Jvjvjv\CodeTalker\Services\Management\AiMcpServerManager;
+
+$result = app(AiMcpServerManager::class)->create([
+    'slug' => 'mdn',                      // lowercase letters, digits, hyphens; max 24; immutable
+    'name' => 'MDN',
+    'url' => 'https://mdn.example/mcp',
+    'auth' => ['type' => 'none'],
+    'timeout_seconds' => 10,              // optional; capped by remote_mcp.max_timeout_seconds
+]);
+
+$result['sync'];  // ['server' => 'mdn', 'stored' => 4, 'unrepresentable' => 0, 'error' => null]
+```
+
+Creating or updating a server **syncs** it: the package lists the server's
+tools once and stores each tool's name, description, and input schema. Chat
+turns, operator runs, and "available tools" listings read that stored catalog
+and never contact the server to find out which tools exist. So a server that
+is down doesn't delay a turn, and a server that has never synced contributes
+no tools. Re-sync with `php artisan ai:sync-mcp-servers [slug]`, which also
+runs daily.
+
+Each remote tool is exposed as `{slug}__{tool}`, for example `mdn__search`.
+Characters outside `[A-Za-z0-9_-]` become `_`, and names longer than 64
+characters are shortened with a hash suffix. That exposed name is the name the
+model sees, and it is what you grant:
+
+```php
+$system->update(['allowed_tools' => ['fetch-web-page', 'mdn__search']]);
+```
+
+Only the tools you name are offered. A tool that appears on the server in a
+later sync is not granted until you add it. The double underscore marks a
+remote tool; if a local tool has the same name, the local tool wins.
+
+**Auth** is stored encrypted and never included in `list()`. The supported
+shapes are:
+
+| `type`               | Fields                                                    |
+| -------------------- | --------------------------------------------------------- |
+| `none`               | —                                                         |
+| `bearer`             | `token`                                                   |
+| `headers`            | `headers` (a map of header name to value)                 |
+| `client_credentials` | `client_id`, `client_secret`, `scope`, `token_endpoint`   |
+
+For `client_credentials`, the token is cached until shortly before it expires.
+If the server rejects it, the package fetches a new token once. Without a
+`token_endpoint`, the endpoint is discovered from the server via OAuth
+metadata. Interactive (authorization-code) OAuth is not supported. To give two
+systems different identities on the same server, define it twice under two
+slugs. The conversation's user and visitor identity is never sent to a remote
+server.
+
+**When a remote server fails**, the turn still completes:
+
+- An unreachable server, a timeout, a malformed response, or an error result
+  becomes a tool error the model can read. It then answers with whatever else
+  it has.
+- After a server fails to connect or times out, its remaining calls in that
+  turn fail immediately rather than waiting out the timeout again. The next
+  turn tries again.
+- A tool whose input schema can't be converted into a tool definition is
+  stored but never offered. `list()` shows it as unavailable, with the reason.
+- While a remote call is in progress, the turn is waiting on it, so no
+  heartbeat is sent. Keep `remote_mcp.max_timeout_seconds` low if you serve
+  turns over a synchronous stream; [detached turns](#detached-turns) are
+  unaffected.
+
+Only the HTTP transport is supported. A stdio server would start a process on
+every turn, and storing its command line in an admin-editable table would let
+the admin UI run commands.
+
+When a re-sync finds that a tool's description or schema has changed, it
+dispatches `Jvjvjv\CodeTalker\Events\RemoteMcpToolDefinitionChanged`. The
+new definition takes effect immediately; listen for the event if you want to
+review changes to tools you have already granted.
+
 ## External MCP Server
 
 Because tools are laravel/mcp `Tool` classes, the same tools can be exposed to
@@ -1014,6 +1103,7 @@ or tests, under `Jvjvjv\CodeTalker\Services\Management`.
 | `AiSystemPromptManager` | Reusable system prompt CRUD, clearing references on delete                                   |
 | `AiPersonaManager`      | Persona CRUD, per-persona usage rollups, available systems, available tools                  |
 | `AiOperatorManager`     | Operator CRUD, per-operator run/usage rollups, available tools                               |
+| `AiMcpServerManager`    | Remote MCP server CRUD, catalog sync, sync health and tool listing                           |
 | `AiConversationManager` | Filter and search conversations, inspect one, queue usage backfill                           |
 | `AiMemoryManager`       | Memory CRUD, triage-ordered listing, per-feature rebuild                                     |
 
@@ -1047,6 +1137,7 @@ an accurate confirmation message:
 ```php
 $deactivatedBots = $systems->delete($system);       // bots are deactivated, not deleted
 $orphanedSystems = $prompts->delete($prompt);       // systems have their prompt cleared
+$affectedSystems = $mcpServers->delete($server);    // systems that had granted one of its tools
 ```
 
 ### What to be aware of
@@ -1061,6 +1152,11 @@ $orphanedSystems = $prompts->delete($prompt);       // systems have their prompt
   or arrays; the manager decodes strings before persisting.
 - **`custom_system_prompt`** is not a column. Supplying it without a
   `system_prompt_id` creates an `AiSystemPrompt` and links it.
+- **An MCP server's `slug` is immutable**, because it prefixes every exposed
+  tool name and grant. `AiMcpServerManager::update()` ignores it. `create()`
+  and `update()` return `['server' => ..., 'sync' => ...]`; a failed sync is
+  reported there and recorded on the server, never thrown. An `update()`
+  without `auth` keeps the stored credentials.
 
 ### Authorization
 
@@ -1070,7 +1166,7 @@ route file, and defaults to `['web', 'auth', 'can:manage-ai-tools']`.
 
 ## Scheduled Jobs
 
-The package registers five jobs automatically (requires Laravel's scheduler to be running):
+The package registers six jobs automatically (requires Laravel's scheduler to be running):
 
 | Job                              | Schedule                   | Description                                             |
 | -------------------------------- | -------------------------- | ------------------------------------------------------- |
@@ -1079,6 +1175,7 @@ The package registers five jobs automatically (requires Laravel's scheduler to b
 | `ai:prune-provider-exchanges`    | Daily at 03:00             | Removes `ai_provider_exchanges` rows past retention     |
 | `ai:prune-turn-events`           | Daily at 03:15             | Removes finished turn runs past `turns.retention_days`  |
 | `ai:complete-idle-conversations` | Every 15 minutes           | Completes idle conversations, triggering memory extract |
+| `ai:sync-mcp-servers`            | Daily at 03:30             | Refreshes remote MCP servers' stored tool catalogs      |
 
 Disable automatic scheduling in config and register manually if needed:
 
@@ -1111,4 +1208,8 @@ php artisan ai:prune-turn-events
 # Mark idle conversations Completed, triggering memory extraction
 php artisan ai:complete-idle-conversations
 php artisan ai:complete-idle-conversations --minutes=60 --dry-run
+
+# Refresh remote MCP tool catalogs (all enabled servers, or one); exits non-zero on any failure
+php artisan ai:sync-mcp-servers
+php artisan ai:sync-mcp-servers mdn
 ```
