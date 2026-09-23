@@ -9,6 +9,7 @@ use Jvjvjv\CodeTalker\Console\Commands\PruneProviderExchangesCommand;
 use Jvjvjv\CodeTalker\Console\Commands\PruneTurnEventsCommand;
 use Jvjvjv\CodeTalker\Console\Commands\ReadProviderExchangeCommand;
 use Jvjvjv\CodeTalker\Console\Commands\SyncConversationUsageCommand;
+use Jvjvjv\CodeTalker\Console\Commands\SyncMcpServersCommand;
 use Jvjvjv\CodeTalker\Jobs\BackfillConversationUsageJob;
 use Jvjvjv\CodeTalker\Mcp\Servers\CodeTalkerServer;
 use Jvjvjv\CodeTalker\Models\AiConversation;
@@ -202,6 +203,7 @@ class CodeTalkerServiceProvider extends ServiceProvider
                 PruneTurnEventsCommand::class,
                 CompleteIdleConversationsCommand::class,
                 ReadProviderExchangeCommand::class,
+                SyncMcpServersCommand::class,
             ]);
         }
 
@@ -225,6 +227,10 @@ class CodeTalkerServiceProvider extends ServiceProvider
 
             Schedule::command('ai:complete-idle-conversations')
                 ->everyFifteenMinutes()
+                ->withoutOverlapping();
+
+            Schedule::command('ai:sync-mcp-servers')
+                ->dailyAt('03:30')
                 ->withoutOverlapping();
         }
     }

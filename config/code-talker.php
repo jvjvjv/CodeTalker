@@ -216,6 +216,29 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Remote MCP Servers
+    |--------------------------------------------------------------------------
+    |
+    | Tools hosted on external MCP servers, defined as AiMcpServer records and
+    | granted to an AiSystem by exposed name ("{server-slug}__{tool}") in its
+    | allowed_tools. Separate from the `mcp` block above, which configures
+    | this package's own server.
+    |
+    | enabled                  master switch; false withdraws every remote tool
+    | default_timeout_seconds  per-call timeout for a server that sets none
+    | max_timeout_seconds      cap on any server's timeout. A blocking remote
+    |                          call pauses the turn's heartbeat, so keep it low.
+    |
+    */
+
+    'remote_mcp' => [
+        'enabled' => env('CODE_TALKER_REMOTE_MCP_ENABLED', true),
+        'default_timeout_seconds' => (int) env('CODE_TALKER_REMOTE_MCP_TIMEOUT', 10),
+        'max_timeout_seconds' => (int) env('CODE_TALKER_REMOTE_MCP_MAX_TIMEOUT', 30),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | AI Providers
     |--------------------------------------------------------------------------
     |
