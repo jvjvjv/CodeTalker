@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1] — 2026-09-28
+
+Documentation-only release: the README's upgrade guide now covers every release through 0.16.0.
+
+### Bug Fixes
+- The "Migrating between versions" table in the README now includes rows for 0.14.1, 0.15.0 and 0.16.0, listing the migrations each requires and the host-app changes 0.15.0 calls for.
+
 ## [0.16.0] — 2026-09-23
 
 An `AiSystem` can now use tools hosted on external MCP servers, granted by name
