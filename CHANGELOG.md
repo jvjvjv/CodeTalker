@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.0] — 2026-10-13
+
+Tightens how an `AiSystem`'s `credentials`, `web_tool_policy` and `role` are validated and enforced.
+
+### Breaking Changes
+- `AiSystemManager::update()` now keeps the stored `credentials` or `web_tool_policy` when either is submitted as `null`, an empty string, or a JSON `null`, where it previously cleared it. To clear one, send an empty object (`'{}'`). This replaces the 0.17.0 advice that an empty submission clears the policy.
+- `credentials` and `web_tool_policy` must be JSON objects; a number, string, boolean or list is rejected by validation on create and update.
+- `web_tool_policy` accepts only the keys `allowed_domains` and `credentials`. Any other key is a validation error naming it, where it was previously stored and ignored.
+- `AgentFactory::forSystem()` throws for a system whose role is `audio` or `transcription`, where it previously built the agent and failed at the provider call.
+
+### Bug Fixes
+- A system loaded without its `role` — selected without the column, or read before the `role` migration has run — is now refused by `AgentFactory::forFeature()` and the audio services with an error that names the system and says what to do, instead of a property-read error.
+
 ## [0.17.0] — 2026-10-13
 
 `AiSystem` records can now serve speech-to-text and text-to-speech, and a serialized system no longer carries its secrets.

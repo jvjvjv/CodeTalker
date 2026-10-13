@@ -37,6 +37,15 @@ class AgentFactory
         ?float $temperature = null,
         int $maxSteps = 6,
     ): CodeTalkerAgent {
+        // Only a role known to be wrong is refused. A system with no role
+        // loaded — built by hand, or read before the role migration ran — is
+        // let through, as it always was; systemForFeature() is the strict path.
+        if ($system->role instanceof AiSystemRole && $system->role !== AiSystemRole::Chat) {
+            throw new \RuntimeException(
+                "AI system '{$system->name}' has the '{$system->role->value}' role, but 'chat' is required."
+            );
+        }
+
         $provider = AiProvider::tryFrom($system->provider);
 
         if ($provider === null) {

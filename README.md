@@ -56,6 +56,7 @@ row from your current version up to your target, in order.
 
 | Version | Action required |
 | ------- | ---------------- |
+| **0.18.0** | **Breaking.** No migrations.<br>• An update that submits `credentials` or `web_tool_policy` blank now keeps the stored value. If you cleared either by submitting it empty, send an empty object (`'{}'`) instead.<br>• `credentials` and `web_tool_policy` must be JSON objects, and `web_tool_policy` accepts only `allowed_domains` and `credentials`. Check stored policies for other keys before their next save.<br>• `AgentFactory::forSystem()` refuses an `audio` or `transcription` system. |
 | **0.17.0** | **Breaking.**<br>• Re-publish and run migrations (`ai_systems.credentials` becomes `text`; `ai_systems.role` is added, defaulting to `chat`).<br>• `AiSystem` no longer includes `api_key`, `credentials` or `web_tool_policy` in `toArray()`/`toJson()`. Anywhere you built an admin payload from a serialized system, read those attributes directly instead.<br>• Check any edit form that prefilled `web_tool_policy` from the serialized system: submitting it empty clears the stored policy, which removes the domain allow-list. Prefill from `$system->web_tool_policy`, or leave the key out of the update.<br>• Optional: re-publish config for the new `providers.elevenlabs.base_url` key. |
 | **0.16.1** | None — documentation only. |
 | **0.16.0** | **Breaking.** Re-publish and run migrations (`ai_mcp_servers`, `ai_mcp_server_tools`) even if you don't use remote MCP servers — `ai:sync-mcp-servers` is scheduled by default and expects the tables.<br>• If you disabled the package scheduler (`'schedule' => false`) and use remote servers, register `ai:sync-mcp-servers` yourself.<br>• Optional: re-publish config for the new `remote_mcp.*` keys. |
@@ -354,8 +355,7 @@ Audio is an `UploadedFile` or any laravel/ai `TranscribableAudio` (`LocalAudio`,
 `AudioResponse` and `TranscriptionResponse`.
 
 Both services refuse an inactive system and a system with a different role, and
-`AgentFactory::forFeature()` likewise refuses a feature whose default is a voice
-system. Each throws a `RuntimeException` naming the role it has and the role required.
+`AgentFactory::forSystem()` and `forFeature()` likewise refuse a voice system. Each throws a `RuntimeException` naming the role it has and the role required.
 
 ### What is not tracked
 
@@ -1263,10 +1263,15 @@ $affectedSystems = $mcpServers->delete($server);    // systems that had granted 
   `web_tool_policy` are left out of `toArray()`/`toJson()`. Read them as
   attributes when an admin screen needs one. To include one in a payload, opt in
   on that instance: `$system->makeVisible('web_tool_policy')`.
-- **Prefill `web_tool_policy` from the attribute.** An update that omits
-  `credentials` or `web_tool_policy` keeps the stored value, but one that submits
-  it empty clears it — and a system with no `web_tool_policy` is unrestricted. A
-  form that cannot show the current policy should leave the key out.
+- **A blank secret on update means "unchanged".** Because `credentials` and
+  `web_tool_policy` cannot be prefilled from a serialized system, `update()` keeps
+  the stored value when either is omitted, `null`, or an empty string. To clear
+  one, send an empty object (`'{}'`). Clearing `web_tool_policy` leaves the system
+  unrestricted.
+- **Both must be JSON objects.** A number, string, boolean or list is rejected for
+  `credentials` and `web_tool_policy`, and `web_tool_policy` accepts only the keys
+  `allowed_domains` and `credentials`, so a misspelt key is an error rather than a
+  policy that restricts nothing.
 - **`role` must suit the provider.** `createRules()` and `updateRules($system)`
   reject a pair the provider cannot serve. `AiSystemManager::providersFor($role)`
   lists the providers that can, for a provider chooser that follows the role.
