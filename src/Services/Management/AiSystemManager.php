@@ -266,6 +266,16 @@ class AiSystemManager
         $featureDefaults = $data['feature_defaults'] ?? [];
         unset($data['feature_defaults']);
 
+        // Both are hidden from serialization, so an edit form cannot prefill
+        // them and posts them blank. Blank therefore means "unchanged", never
+        // "clear": a cleared web_tool_policy is an unrestricted one. An empty
+        // object is the explicit way to clear either.
+        foreach (['credentials', 'web_tool_policy'] as $secret) {
+            if (array_key_exists($secret, $data) && ($data[$secret] === null || $data[$secret] === '')) {
+                unset($data[$secret]);
+            }
+        }
+
         $this->resolveCustomSystemPrompt($data);
         $this->decodeJsonFields($data);
 

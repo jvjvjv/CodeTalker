@@ -15,6 +15,7 @@ use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiSystemFeatureDefault;
 use Jvjvjv\CodeTalker\Models\AiSystemPrompt;
 use Jvjvjv\CodeTalker\Services\Management\AiSystemManager;
+use Jvjvjv\CodeTalker\Services\Web\WebToolPolicy;
 use Jvjvjv\CodeTalker\Tests\TestCase;
 
 class AiSystemManagerTest extends TestCase
@@ -451,6 +452,58 @@ class AiSystemManagerTest extends TestCase
         $this->assertSame('Renamed', $fresh->name);
         $this->assertSame(['client_secret' => 'shh'], $fresh->credentials);
         $this->assertSame(['api.example.com'], $fresh->web_tool_policy['allowed_domains']);
+    }
+
+    public function test_an_update_that_submits_the_secrets_blank_keeps_them(): void
+    {
+        // A form cannot prefill a hidden attribute, so it posts the field
+        // empty. That must not read as "remove the allow-list".
+        foreach ([null, ''] as $blank) {
+            $system = $this->systemWithSecrets();
+
+            $this->manager()->update($system, [
+                'name' => 'Renamed',
+                'max_tokens' => 2048,
+                'credentials' => $blank,
+                'web_tool_policy' => $blank,
+            ]);
+
+            $fresh = $system->fresh();
+            $this->assertSame('Renamed', $fresh->name);
+            $this->assertSame(['client_secret' => 'shh'], $fresh->credentials);
+            $this->assertSame(['api.example.com'], $fresh->web_tool_policy['allowed_domains']);
+        }
+    }
+
+    public function test_an_update_clears_a_secret_only_when_given_an_empty_object(): void
+    {
+        $system = $this->systemWithSecrets();
+
+        $this->manager()->update($system, [
+            'name' => 'Test System',
+            'max_tokens' => 1024,
+            'credentials' => '{}',
+            'web_tool_policy' => '{}',
+        ]);
+
+        $fresh = $system->fresh();
+        $this->assertSame([], $fresh->credentials);
+        $this->assertSame([], $fresh->web_tool_policy);
+        $this->assertNull(WebToolPolicy::fromArray($fresh->web_tool_policy)->allowedDomains);
+    }
+
+    public function test_an_update_can_still_replace_a_secret(): void
+    {
+        $system = $this->systemWithSecrets();
+
+        $this->manager()->update($system, [
+            'name' => 'Test System',
+            'max_tokens' => 1024,
+            'web_tool_policy' => json_encode(['allowed_domains' => ['other.example.com']]),
+        ]);
+
+        $this->assertSame(['other.example.com'], $system->fresh()->web_tool_policy['allowed_domains']);
+        $this->assertSame(['client_secret' => 'shh'], $system->fresh()->credentials);
     }
 
     public function test_the_credentials_migration_declares_a_text_column(): void
