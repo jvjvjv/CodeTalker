@@ -39,6 +39,9 @@ class ProviderModelsClient
             AiProvider::OpenAI, AiProvider::OpenAICompatible, AiProvider::Grok => $this->openAiCompatibleModels($provider, $apiKey, $baseUrl),
             AiProvider::Gemini => $this->geminiModels($apiKey, $baseUrl),
             AiProvider::LmStudio => (new LmStudioServerClient($baseUrl, $apiKey))->listModels(),
+            // Voice models are not listed; the model field is free text and
+            // may be left blank to use the provider's default.
+            AiProvider::ElevenLabs => [],
         };
     }
 

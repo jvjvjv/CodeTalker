@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
+use Jvjvjv\CodeTalker\Enums\AiSystemRole;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\Mcp\ChatBotToolRegistry;
 
@@ -145,7 +146,7 @@ class AiPersonaManager
     }
 
     /**
-     * Active systems shaped for a persona form, so it can show what each
+     * Active chat systems shaped for a persona form, so it can show what each
      * system would contribute if the persona inherits its settings.
      *
      * @return array<int, array{id: int, name: string, model: string, context_length: int|null, temperature: float|null, supports_tools: bool}>
@@ -154,6 +155,7 @@ class AiPersonaManager
     {
         return AiSystem::query()
             ->active()
+            ->role(AiSystemRole::Chat)
             ->orderBy('name')
             ->get()
             ->map(static fn (AiSystem $system): array => [

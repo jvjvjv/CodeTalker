@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Jvjvjv\CodeTalker\Enums\AiSystemRole;
 
 class AiSystem extends Model
 {
@@ -17,6 +18,7 @@ class AiSystem extends Model
     protected $fillable = [
         'name',
         'provider',
+        'role',
         'api_key',
         'model',
         'model_capabilities',
@@ -46,9 +48,25 @@ class AiSystem extends Model
         'pricing_profile',
     ];
 
+    // Encrypted at rest, and kept out of toArray()/toJson() so a system passed
+    // to a response or an admin payload never carries them. Read them as
+    // attributes; replicate() copies them regardless.
+    protected $hidden = [
+        'api_key',
+        'credentials',
+        'web_tool_policy',
+    ];
+
+    // Mirrors the column default, so a system built in memory resolves the
+    // same way as one read back from the database.
+    protected $attributes = [
+        'role' => 'chat',
+    ];
+
     protected function casts(): array
     {
         return [
+            'role' => AiSystemRole::class,
             'api_key' => 'encrypted',
             'config' => 'array',
             'credentials' => 'encrypted:array',
@@ -72,6 +90,11 @@ class AiSystem extends Model
     public function scopeActive($query)
     {
         return $query->where('is_active', true);
+    }
+
+    public function scopeRole($query, AiSystemRole $role)
+    {
+        return $query->where('role', $role->value);
     }
 
     public static function defaultForFeature(string $feature): ?self

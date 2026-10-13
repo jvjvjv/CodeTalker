@@ -118,6 +118,7 @@ ANTHROPIC_BASE_URL=https://api.anthropic.com/v1
 OPENAI_BASE_URL=https://api.openai.com/v1
 GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta
 GROK_BASE_URL=https://api.x.ai/v1
+ELEVENLABS_BASE_URL=https://api.elevenlabs.io/v1
 LMSTUDIO_SERVER_URL=http://localhost:1234
 ```
 
@@ -216,17 +217,23 @@ An `AiSystem` record represents a fully configured provider endpoint. Create one
 
 | Field              | Description                                                                       |
 | ------------------ | --------------------------------------------------------------------------------- |
-| `provider`         | One of: `anthropic`, `openai`, `openai-compatible`, `gemini`, `grok`, `lm-studio` |
+| `provider`         | One of: `anthropic`, `openai`, `openai-compatible`, `gemini`, `grok`, `lm-studio`, `elevenlabs` |
+| `role`             | `chat` (default), `audio`, or `transcription` — see [Audio Systems](#audio-systems) |
 | `model`            | Provider-specific model name                                                      |
-| `api_key`          | Stored encrypted                                                                  |
+| `api_key`          | Stored encrypted; omitted from serialized output                                  |
+| `credentials`      | Free-form credentials map for your own use. Stored encrypted; omitted from serialized output |
 | `max_tokens`       | Maximum output tokens per request                                                 |
 | `temperature`      | Sampling temperature (overrides persona-level default)                            |
 | `context_length`   | Context window for local models (LM Studio)                                       |
 | `enable_thinking`  | Enable extended thinking / reasoning output (Anthropic)                           |
 | `allowed_tools`    | Array of tool names the model may invoke                                          |
-| `web_tool_policy`  | Domain allow-list and credentials for `fetch-web-page`/`http-request` — see below  |
+| `web_tool_policy`  | Domain allow-list and credentials for `fetch-web-page`/`http-request` — see below. Stored encrypted; omitted from serialized output |
 | `system_prompt_id` | Optional FK to an `AiSystemPrompt` record                                         |
 | `is_active`        | Inactive systems are rejected by the factory                                      |
+
+`api_key`, `credentials` and `web_tool_policy` never appear in `$system->toArray()`
+or `toJson()`, including when a system is serialized as a relation of a persona or
+operator. Read them as attributes (`$system->web_tool_policy`).
 
 ### Getting an agent in code
 
@@ -264,6 +271,103 @@ tool use, structured output — applies. Prior versions returned an
 ### Feature defaults
 
 Map a feature key to a default `AiSystem` via the `ai_system_feature_defaults` table (managed through `AiSystemManager`). This decouples application code from specific system IDs.
+
+## Audio Systems
+
+Speech-to-text and text-to-speech run through `AiSystem` records too, so a voice
+provider's key lives on an encrypted record exactly as a chat provider's does. A
+system serves one role, set by its `role` field: `chat`, `audio` (text-to-speech),
+or `transcription` (speech-to-text).
+
+Which providers can serve which role:
+
+| Provider            | `chat` | `audio` | `transcription` |
+| ------------------- | :----: | :-----: | :-------------: |
+| `anthropic`         |   ✅   |    —    |        —        |
+| `openai`            |   ✅   |   ✅    |       ✅        |
+| `gemini`            |   ✅   |   ✅    |       ✅        |
+| `grok`              |   ✅   |    —    |        —        |
+| `elevenlabs`        |   —    |   ✅    |       ✅        |
+| `openai-compatible` |   ✅   |    —    |        —        |
+| `lm-studio`         |   ✅   |    —    |        —        |
+
+> **`lm-studio` and `openai-compatible` serve neither voice role.** If you chat on
+> a local model, voice needs its own record on a provider that supports it. One
+> record cannot do both.
+
+Create a voice system with `AiSystemManager`. A pair the provider cannot serve is
+rejected by validation, naming the provider and the role. `model` and `max_tokens`
+are optional for voice roles; a blank model uses the provider's default.
+
+```php
+use Jvjvjv\CodeTalker\Services\Management\AiSystemManager;
+
+$narrator = app(AiSystemManager::class)->create([
+    'name' => 'Narrator',
+    'provider' => 'elevenlabs',
+    'role' => 'audio',
+    'api_key' => $key,
+    'feature_defaults' => ['voice:greeting'],
+]);
+```
+
+### Generating speech
+
+```php
+use Jvjvjv\CodeTalker\Services\Audio\SpeechService;
+
+$speech = app(SpeechService::class);
+
+// From a specific system record
+$response = $speech->forSystem($narrator, 'Welcome back.', voice: 'nova', instructions: 'Warm and unhurried.');
+
+// From a feature key
+$response = $speech->forFeature('voice:greeting', 'Welcome back.');
+
+$response->content();   // raw audio bytes
+$response->mime;        // e.g. audio/mpeg
+```
+
+`voice` is a provider voice name or ID; leave it out for the provider's default.
+
+### Transcribing audio
+
+```php
+use Jvjvjv\CodeTalker\Services\Audio\TranscriptionService;
+use Laravel\Ai\Files\LocalAudio;
+
+$transcription = app(TranscriptionService::class);
+
+// An uploaded file, from a specific system record
+$response = $transcription->forSystem($system, $request->file('audio'), language: 'en');
+
+// A file on disk, from a feature key, with speakers separated
+$response = $transcription->forFeature('voice:dictation', new LocalAudio($path), diarize: true);
+
+$response->text;       // the transcript
+$response->segments;   // per-speaker segments when diarized
+```
+
+Audio is an `UploadedFile` or any laravel/ai `TranscribableAudio` (`LocalAudio`,
+`StoredAudio`, `Base64Audio`). Both services return laravel/ai's own
+`AudioResponse` and `TranscriptionResponse`.
+
+Both services refuse an inactive system and a system with a different role, and
+`AgentFactory::forFeature()` likewise refuses a feature whose default is a voice
+system. Each throws a `RuntimeException` naming the role it has and the role required.
+
+### What is not tracked
+
+- **Cost and usage.** Speech and transcription calls are not included in
+  conversation usage or cost totals. Speech responses carry no usage data, and
+  voice is billed per character or per minute, which the token-based pricing
+  config cannot represent.
+- **The LLM message log.** Voice calls are not written to `AiLlmMessage`, which
+  records conversation turns.
+- **Raw exchanges, by default.** Voice calls are captured like any other provider
+  call, but `raw_exchanges.providers` defaults to `lm-studio`. Add `openai`,
+  `gemini` or `elevenlabs` to it (or set `all`) to capture them — see
+  [Raw Provider Exchange Logging](#raw-provider-exchange-logging).
 
 ## Conversation History
 
@@ -1152,8 +1256,22 @@ $affectedSystems = $mcpServers->delete($server);    // systems that had granted 
 - **A feature has exactly one default system.** Assigning a feature default that
   another system holds takes it from that system. `claimedFeatures()` tells you
   which are already spoken for, optionally ignoring the system being edited.
-- **`config`, `credentials`, and `pricing_profile`** may be passed as JSON strings
-  or arrays; the manager decodes strings before persisting.
+- **`config`, `credentials`, `pricing_profile`, and `web_tool_policy`** may be passed
+  as JSON strings or arrays; the manager decodes strings before persisting.
+- **A system's secrets are not serialized.** `api_key`, `credentials` and
+  `web_tool_policy` are left out of `toArray()`/`toJson()`. Read them as
+  attributes when an admin screen needs one. To include one in a payload, opt in
+  on that instance: `$system->makeVisible('web_tool_policy')`.
+- **Prefill `web_tool_policy` from the attribute.** An update that omits
+  `credentials` or `web_tool_policy` keeps the stored value, but one that submits
+  it empty clears it — and a system with no `web_tool_policy` is unrestricted. A
+  form that cannot show the current policy should leave the key out.
+- **`role` must suit the provider.** `createRules()` and `updateRules($system)`
+  reject a pair the provider cannot serve. `AiSystemManager::providersFor($role)`
+  lists the providers that can, for a provider chooser that follows the role.
+  `availableModels()` lists chat models; for a voice role leave `model` as free
+  text, or blank for the provider's default. `AiPersonaManager::availableSystems()`
+  offers chat systems only.
 - **`custom_system_prompt`** is not a column. Supplying it without a
   `system_prompt_id` creates an `AiSystemPrompt` and links it.
 - **An MCP server's `slug` is immutable**, because it prefixes every exposed

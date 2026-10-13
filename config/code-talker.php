@@ -337,6 +337,10 @@ return [
             'base_url' => env('GROK_BASE_URL', 'https://api.x.ai/v1'),
         ],
 
+        'elevenlabs' => [
+            'base_url' => env('ELEVENLABS_BASE_URL', 'https://api.elevenlabs.io/v1'),
+        ],
+
         'lm-studio' => [
             'server_url' => env('LMSTUDIO_SERVER_URL', 'http://localhost:1234'),
         ],
