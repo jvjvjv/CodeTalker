@@ -174,4 +174,34 @@ class AgentFactoryTest extends TestCase
 
         $this->assertSame([], $this->factory->forSystem($nonReasoningModel)->providerOptions('lm-studio'));
     }
+
+    public function test_a_voice_system_cannot_be_turned_into_a_chat_agent(): void
+    {
+        $system = $this->makeSystem([
+            'name' => 'Narrator',
+            'provider' => 'elevenlabs',
+            'api_key' => 'xi-test',
+            'role' => 'audio',
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage("AI system 'Narrator' has the 'audio' role, but 'chat' is required.");
+
+        $this->factory->forSystem($system);
+    }
+
+    public function test_a_system_with_no_role_loaded_still_builds_a_chat_agent(): void
+    {
+        // forSystem() is handed models built by hand and rows read before the
+        // role migration has run; only a role that is known to be wrong is refused.
+        $system = $this->makeSystem([
+            'provider' => 'lm-studio',
+            'base_url' => 'http://localhost:1234',
+            'model' => 'qwen/qwen3.6-35b-a3b',
+        ]);
+        $system->setRawAttributes(array_diff_key($system->getAttributes(), ['role' => true]));
+
+        $this->assertNull($system->role);
+        $this->assertSame('qwen/qwen3.6-35b-a3b', $this->factory->forSystem($system)->model());
+    }
 }

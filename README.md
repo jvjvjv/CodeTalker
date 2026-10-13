@@ -354,8 +354,7 @@ Audio is an `UploadedFile` or any laravel/ai `TranscribableAudio` (`LocalAudio`,
 `AudioResponse` and `TranscriptionResponse`.
 
 Both services refuse an inactive system and a system with a different role, and
-`AgentFactory::forFeature()` likewise refuses a feature whose default is a voice
-system. Each throws a `RuntimeException` naming the role it has and the role required.
+`AgentFactory::forSystem()` and `forFeature()` likewise refuse a voice system. Each throws a `RuntimeException` naming the role it has and the role required.
 
 ### What is not tracked
 
