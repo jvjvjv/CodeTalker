@@ -110,4 +110,32 @@ class AiSystemResolverTest extends TestCase
 
         $this->app->make(AgentFactory::class)->systemForFeature('persona:support');
     }
+
+    public function test_a_system_loaded_without_its_role_is_refused_with_a_readable_error(): void
+    {
+        $system = $this->systemFor('voice:greeting', ['role' => 'audio']);
+        $partial = AiSystem::query()->select(['id', 'name', 'provider', 'is_active'])->findOrFail($system->id);
+
+        foreach ([AiSystemRole::Chat, AiSystemRole::Audio] as $expected) {
+            try {
+                $this->resolver()->ensureUsable($partial, $expected);
+                $this->fail("A system with no role loaded was accepted for {$expected->value}.");
+            } catch (RuntimeException $e) {
+                $this->assertStringContainsString("AI system 'System' has no role", $e->getMessage());
+                $this->assertStringContainsString('migrat', $e->getMessage());
+            }
+        }
+    }
+
+    public function test_a_feature_is_refused_with_a_readable_error_before_the_role_migration_has_run(): void
+    {
+        $this->systemFor('persona:support');
+
+        (require __DIR__ . '/../../database/migrations/2026_10_12_000002_add_role_to_ai_systems_table.php')->down();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage("AI system 'System' has no role");
+
+        $this->app->make(AgentFactory::class)->systemForFeature('persona:support');
+    }
 }
