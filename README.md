@@ -354,8 +354,7 @@ Audio is an `UploadedFile` or any laravel/ai `TranscribableAudio` (`LocalAudio`,
 `AudioResponse` and `TranscriptionResponse`.
 
 Both services refuse an inactive system and a system with a different role, and
-`AgentFactory::forFeature()` likewise refuses a feature whose default is a voice
-system. Each throws a `RuntimeException` naming the role it has and the role required.
+`AgentFactory::forSystem()` and `forFeature()` likewise refuse a voice system. Each throws a `RuntimeException` naming the role it has and the role required.
 
 ### What is not tracked
 
@@ -1263,10 +1262,15 @@ $affectedSystems = $mcpServers->delete($server);    // systems that had granted 
   `web_tool_policy` are left out of `toArray()`/`toJson()`. Read them as
   attributes when an admin screen needs one. To include one in a payload, opt in
   on that instance: `$system->makeVisible('web_tool_policy')`.
-- **Prefill `web_tool_policy` from the attribute.** An update that omits
-  `credentials` or `web_tool_policy` keeps the stored value, but one that submits
-  it empty clears it — and a system with no `web_tool_policy` is unrestricted. A
-  form that cannot show the current policy should leave the key out.
+- **A blank secret on update means "unchanged".** Because `credentials` and
+  `web_tool_policy` cannot be prefilled from a serialized system, `update()` keeps
+  the stored value when either is omitted, `null`, or an empty string. To clear
+  one, send an empty object (`'{}'`). Clearing `web_tool_policy` leaves the system
+  unrestricted.
+- **Both must be JSON objects.** A number, string, boolean or list is rejected for
+  `credentials` and `web_tool_policy`, and `web_tool_policy` accepts only the keys
+  `allowed_domains` and `credentials`, so a misspelt key is an error rather than a
+  policy that restricts nothing.
 - **`role` must suit the provider.** `createRules()` and `updateRules($system)`
   reject a pair the provider cannot serve. `AiSystemManager::providersFor($role)`
   lists the providers that can, for a provider chooser that follows the role.

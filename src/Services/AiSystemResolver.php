@@ -31,9 +31,11 @@ class AiSystemResolver
             throw new RuntimeException("The default AI system for feature '{$feature}' is inactive.");
         }
 
-        if ($system->role !== $expected) {
+        $role = $this->roleOf($system);
+
+        if ($role !== $expected) {
             throw new RuntimeException(
-                "The default AI system for feature '{$feature}' has the '{$system->role->value}' role, "
+                "The default AI system for feature '{$feature}' has the '{$role->value}' role, "
                 . "but '{$expected->value}' is required."
             );
         }
@@ -50,13 +52,35 @@ class AiSystemResolver
             throw new RuntimeException("AI system '{$system->name}' is inactive.");
         }
 
-        if ($system->role !== $expected) {
+        $role = $this->roleOf($system);
+
+        if ($role !== $expected) {
             throw new RuntimeException(
-                "AI system '{$system->name}' has the '{$system->role->value}' role, "
+                "AI system '{$system->name}' has the '{$role->value}' role, "
                 . "but '{$expected->value}' is required."
             );
         }
 
         return $system;
+    }
+
+    /**
+     * A role that is not loaded is refused rather than assumed. The model has
+     * none when the row was selected without the column, or when the `role`
+     * migration has not run yet; guessing `chat` in either case would let a
+     * voice system through the chat guard.
+     */
+    private function roleOf(AiSystem $system): AiSystemRole
+    {
+        $role = $system->role;
+
+        if (!$role instanceof AiSystemRole) {
+            throw new RuntimeException(
+                "AI system '{$system->name}' has no role. Run the package migrations, "
+                . 'and include `role` when selecting AiSystem columns.'
+            );
+        }
+
+        return $role;
     }
 }

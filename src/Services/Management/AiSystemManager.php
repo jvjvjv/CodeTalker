@@ -153,7 +153,7 @@ class AiSystemManager
             'system_prompt_id' => ['nullable', 'integer', 'exists:ai_system_prompts,id'],
             'custom_system_prompt' => ['nullable', 'string'],
             'config' => ['nullable', 'json'],
-            'credentials' => ['nullable', 'json'],
+            'credentials' => ['nullable', 'json', static::credentialsRule()],
             'auth_type' => ['nullable', 'string', 'max:50'],
             'endpoint_type' => ['nullable', 'string', 'max:50'],
             'stream_protocol' => ['nullable', 'string', 'max:50'],
@@ -180,6 +180,30 @@ class AiSystemManager
      * `json` rule already guarantees the raw string decodes; this only checks
      * what it decodes to.
      */
+    /**
+     * Whether a decoded JSON value is an object (or the empty value that
+     * clears a field). Scalars and lists pass the `json` rule but are not a
+     * shape either encrypted map can be read back as.
+     */
+    private static function isJsonObject(mixed $decoded): bool
+    {
+        return is_array($decoded) && ($decoded === [] || !array_is_list($decoded));
+    }
+
+    /**
+     * `credentials` is a free-form map, so only its outer shape is checked.
+     */
+    private static function credentialsRule(): \Closure
+    {
+        return static function (string $attribute, mixed $value, \Closure $fail): void {
+            $decoded = is_string($value) ? json_decode($value, true) : $value;
+
+            if ($decoded !== null && !static::isJsonObject($decoded)) {
+                $fail('The :attribute must decode to an object.');
+            }
+        };
+    }
+
     private static function webToolPolicyRule(): \Closure
     {
         return static function (string $attribute, mixed $value, \Closure $fail): void {
@@ -189,8 +213,18 @@ class AiSystemManager
                 return;
             }
 
-            if (!is_array($decoded)) {
+            if (!static::isJsonObject($decoded)) {
                 $fail('The :attribute must decode to an object.');
+
+                return;
+            }
+
+            // An unrecognised key is refused rather than ignored: a misspelt
+            // `allowed_domains` would otherwise read back as no allow-list.
+            $unknown = array_diff(array_keys($decoded), ['allowed_domains', 'credentials']);
+
+            if ($unknown !== []) {
+                $fail('The :attribute has an unknown key: ' . implode(', ', $unknown) . '.');
 
                 return;
             }
@@ -268,6 +302,17 @@ class AiSystemManager
 
         $this->resolveCustomSystemPrompt($data);
         $this->decodeJsonFields($data);
+
+        // Both are hidden from serialization, so an edit form cannot prefill
+        // them and posts them blank. Blank therefore means "unchanged", never
+        // "clear": a cleared web_tool_policy is an unrestricted one. An empty
+        // object is the explicit way to clear either. This runs after the
+        // decode on purpose — a JSON `null` is a string until then.
+        foreach (['credentials', 'web_tool_policy'] as $secret) {
+            if (array_key_exists($secret, $data) && ($data[$secret] === null || $data[$secret] === '')) {
+                unset($data[$secret]);
+            }
+        }
 
         // Capability hydration resolves against the provider, model, and
         // endpoint the system already has. They are re-attached only so the
