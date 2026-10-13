@@ -17,6 +17,7 @@ use Jvjvjv\CodeTalker\Models\AiSystemPrompt;
 use Jvjvjv\CodeTalker\Services\Management\AiSystemManager;
 use Jvjvjv\CodeTalker\Services\Web\WebToolPolicy;
 use Jvjvjv\CodeTalker\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class AiSystemManagerTest extends TestCase
 {
@@ -504,6 +505,80 @@ class AiSystemManagerTest extends TestCase
 
         $this->assertSame(['other.example.com'], $system->fresh()->web_tool_policy['allowed_domains']);
         $this->assertSame(['client_secret' => 'shh'], $system->fresh()->credentials);
+    }
+
+    public function test_an_update_that_submits_a_json_null_secret_keeps_it(): void
+    {
+        // "null" is valid JSON, so it passes validation as a string and only
+        // becomes null once decoded.
+        $system = $this->systemWithSecrets();
+
+        $this->manager()->update($system, [
+            'name' => 'Test System',
+            'max_tokens' => 1024,
+            'credentials' => 'null',
+            'web_tool_policy' => ' null ',
+        ]);
+
+        $fresh = $system->fresh();
+        $this->assertSame(['client_secret' => 'shh'], $fresh->credentials);
+        $this->assertSame(['api.example.com'], $fresh->web_tool_policy['allowed_domains']);
+    }
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function secretsThatAreNotObjects(): array
+    {
+        $cases = [];
+
+        foreach (['credentials', 'web_tool_policy'] as $field) {
+            foreach (['a number' => '5', 'a string' => '"api.example.com"', 'a boolean' => 'true', 'a list' => '["api.example.com"]'] as $label => $json) {
+                $cases["{$field} as {$label}"] = [$field, $json];
+            }
+        }
+
+        return $cases;
+    }
+
+    #[DataProvider('secretsThatAreNotObjects')]
+    public function test_a_secret_that_does_not_decode_to_an_object_is_rejected(string $field, string $json): void
+    {
+        try {
+            $this->manager()->create($this->validAttributes([$field => $json]));
+            $this->fail("{$field} was accepted as {$json}.");
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey($field, $e->errors());
+        }
+
+        $system = $this->systemWithSecrets();
+
+        try {
+            $this->manager()->update($system, ['name' => 'Test System', 'max_tokens' => 1024, $field => $json]);
+            $this->fail("{$field} was updated to {$json}.");
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey($field, $e->errors());
+        }
+
+        $this->assertSame(['api.example.com'], $system->fresh()->web_tool_policy['allowed_domains']);
+        $this->assertSame(['client_secret' => 'shh'], $system->fresh()->credentials);
+    }
+
+    public function test_a_web_tool_policy_with_an_unknown_key_is_rejected(): void
+    {
+        // A misspelt `allowed_domains` would otherwise be stored and read back
+        // as "no allow-list".
+        try {
+            $this->manager()->create($this->validAttributes([
+                'web_tool_policy' => json_encode(['allowed_domain' => ['api.example.com']]),
+            ]));
+            $this->fail('A policy with an unknown key was accepted.');
+        } catch (ValidationException $e) {
+            $this->assertSame(
+                ['The web tool policy has an unknown key: allowed_domain.'],
+                $e->errors()['web_tool_policy'],
+            );
+        }
     }
 
     public function test_the_credentials_migration_declares_a_text_column(): void

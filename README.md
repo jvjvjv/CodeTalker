@@ -1267,6 +1267,10 @@ $affectedSystems = $mcpServers->delete($server);    // systems that had granted 
   the stored value when either is omitted, `null`, or an empty string. To clear
   one, send an empty object (`'{}'`). Clearing `web_tool_policy` leaves the system
   unrestricted.
+- **Both must be JSON objects.** A number, string, boolean or list is rejected for
+  `credentials` and `web_tool_policy`, and `web_tool_policy` accepts only the keys
+  `allowed_domains` and `credentials`, so a misspelt key is an error rather than a
+  policy that restricts nothing.
 - **`role` must suit the provider.** `createRules()` and `updateRules($system)`
   reject a pair the provider cannot serve. `AiSystemManager::providersFor($role)`
   lists the providers that can, for a provider chooser that follows the role.
