@@ -10,6 +10,7 @@ enum AiProvider: string
     case LmStudio = 'lm-studio';
     case Gemini = 'gemini';
     case Grok = 'grok';
+    case ElevenLabs = 'elevenlabs';
 
     /**
      * @return array<int, string>
@@ -35,6 +36,22 @@ enum AiProvider: string
             self::OpenAICompatible, self::LmStudio => 'openai-compatible',
             self::Gemini => 'gemini',
             self::Grok => 'xai',
+            // laravel/ai registers ElevenLabs as `eleven`, not `elevenlabs`.
+            self::ElevenLabs => 'eleven',
+        };
+    }
+
+    /**
+     * Whether the laravel/ai driver behind this provider implements the
+     * gateway a role needs. AiSystemRoleTest checks this against the driver
+     * classes themselves.
+     */
+    public function supportsRole(AiSystemRole $role): bool
+    {
+        return match ($this) {
+            self::OpenAI, self::Gemini => true,
+            self::ElevenLabs => $role !== AiSystemRole::Chat,
+            self::Anthropic, self::Grok, self::OpenAICompatible, self::LmStudio => $role === AiSystemRole::Chat,
         };
     }
 }

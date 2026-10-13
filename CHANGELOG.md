@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.17.0] — 2026-10-13
+
+`AiSystem` records can now serve speech-to-text and text-to-speech, and a serialized system no longer carries its secrets.
+
+### Breaking Changes
+- `AiSystem` no longer includes `api_key`, `credentials` or `web_tool_policy` in `toArray()` or `toJson()`, including when serialized as a relation. Read them as attributes, or call `makeVisible()` on the instance to include one. An edit form that prefilled `web_tool_policy` from the serialized system must read the attribute instead: submitting the field empty clears the stored policy, and a system with no policy is unrestricted.
+- Two new migrations ship with this release: `ai_systems.credentials` changes from `json` to `text`, and `ai_systems.role` is added with a default of `chat`. Re-publish migrations and run them.
+
+### New Features
+- Added `Services/Audio/SpeechService` and `Services/Audio/TranscriptionService`, each with `forSystem()` and `forFeature()`, for text-to-speech and speech-to-text using the credentials on an `AiSystem` record. They return laravel/ai's `AudioResponse` and `TranscriptionResponse`.
+- Added `AiSystem::role` (`chat`, `audio`, `transcription`), the `AiSystemRole` enum and an `AiSystem::role()` query scope. A system serves one role, and `AgentFactory::forFeature()` refuses a feature whose default is a voice system.
+- Added the `elevenlabs` provider, for the `audio` and `transcription` roles, with a `providers.elevenlabs.base_url` config key (`ELEVENLABS_BASE_URL`).
+- `AiSystemManager` validates `role` and rejects a provider that cannot serve it, naming both. `model` and `max_tokens` are optional for voice roles; a blank model uses the provider's default.
+- Added `AiSystemManager::providersFor($role)` and `AiProvider::supportsRole()`. `AiPersonaManager::availableSystems()` now lists chat systems only.
+
+### Bug Fixes
+- Saving `credentials` on an `AiSystem` no longer fails on databases that validate JSON columns.
+
+### Known Issues
+- Speech and transcription calls are not included in usage or cost totals and are not written to `AiLlmMessage`.
+- `lm-studio` and `openai-compatible` cannot serve the `audio` or `transcription` roles; voice needs a separate system on `openai`, `gemini` or `elevenlabs`.
+- Voice calls are captured as raw exchanges only when their provider is added to `raw_exchanges.providers`, which defaults to `lm-studio`.
+
 ## [0.16.1] — 2026-09-28
 
 Documentation-only release: the README's upgrade guide now covers every release through 0.16.0.

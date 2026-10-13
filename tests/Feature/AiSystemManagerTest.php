@@ -3,9 +3,13 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
+use Jvjvjv\CodeTalker\Enums\AiSystemRole;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiSystemFeatureDefault;
@@ -357,5 +361,308 @@ class AiSystemManagerTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
 
         $this->manager()->availableModels(AiProvider::Anthropic, null);
+    }
+
+    private function credentialsMigration(): object
+    {
+        return require __DIR__ . '/../../database/migrations/2026_10_12_000001_change_ai_systems_credentials_to_text.php';
+    }
+
+    private function systemWithSecrets(): AiSystem
+    {
+        return $this->manager()->create($this->validAttributes([
+            'credentials' => json_encode(['client_secret' => 'shh']),
+            'web_tool_policy' => json_encode([
+                'allowed_domains' => ['api.example.com'],
+                'credentials' => ['api.example.com' => ['Authorization' => 'Bearer secret']],
+            ]),
+        ]));
+    }
+
+    public function test_a_serialized_system_carries_none_of_its_secrets(): void
+    {
+        $system = $this->systemWithSecrets()->fresh();
+
+        foreach ([$system->toArray(), json_decode($system->toJson(), true)] as $serialized) {
+            $this->assertArrayNotHasKey('api_key', $serialized);
+            $this->assertArrayNotHasKey('credentials', $serialized);
+            $this->assertArrayNotHasKey('web_tool_policy', $serialized);
+            $this->assertSame('Test System', $serialized['name']);
+            $this->assertSame('anthropic', $serialized['provider']);
+        }
+    }
+
+    public function test_hidden_secrets_are_still_readable_as_attributes(): void
+    {
+        $system = $this->systemWithSecrets()->fresh();
+
+        $this->assertSame('sk-ant-test', $system->api_key);
+        $this->assertSame(['client_secret' => 'shh'], $system->credentials);
+        $this->assertSame(['api.example.com'], $system->web_tool_policy['allowed_domains']);
+    }
+
+    public function test_a_host_can_make_one_hidden_secret_visible(): void
+    {
+        $serialized = $this->systemWithSecrets()->fresh()->makeVisible('web_tool_policy')->toArray();
+
+        $this->assertSame(['api.example.com'], $serialized['web_tool_policy']['allowed_domains']);
+        $this->assertArrayNotHasKey('api_key', $serialized);
+        $this->assertArrayNotHasKey('credentials', $serialized);
+    }
+
+    public function test_a_persona_serialized_with_its_system_carries_none_of_the_secrets(): void
+    {
+        $system = $this->systemWithSecrets();
+
+        $persona = AiPersona::create([
+            'ai_system_id' => $system->id,
+            'name' => 'Support',
+            'slug' => 'support',
+            'prompt_template' => 'You are {{persona_name}}.',
+            'is_active' => true,
+        ])->load('aiSystem');
+
+        $nested = $persona->toArray()['ai_system'];
+
+        $this->assertSame($system->id, $nested['id']);
+        $this->assertArrayNotHasKey('api_key', $nested);
+        $this->assertArrayNotHasKey('credentials', $nested);
+        $this->assertArrayNotHasKey('web_tool_policy', $nested);
+    }
+
+    public function test_duplicating_a_system_copies_its_secrets(): void
+    {
+        $system = $this->systemWithSecrets();
+
+        $clone = $this->manager()->duplicate($system)->fresh();
+
+        $this->assertSame('sk-ant-test', $clone->api_key);
+        $this->assertSame($system->fresh()->credentials, $clone->credentials);
+        $this->assertSame($system->fresh()->web_tool_policy, $clone->web_tool_policy);
+    }
+
+    public function test_an_update_that_omits_the_secrets_keeps_them(): void
+    {
+        $system = $this->systemWithSecrets();
+
+        $this->manager()->update($system, ['name' => 'Renamed', 'max_tokens' => 2048]);
+
+        $fresh = $system->fresh();
+        $this->assertSame('Renamed', $fresh->name);
+        $this->assertSame(['client_secret' => 'shh'], $fresh->credentials);
+        $this->assertSame(['api.example.com'], $fresh->web_tool_policy['allowed_domains']);
+    }
+
+    public function test_the_credentials_migration_declares_a_text_column(): void
+    {
+        // SQLite reports a `json` column as text, so the type is asserted
+        // against the SQL a validating database is sent. Pretend mode compiles
+        // it without connecting.
+        config()->set('database.connections.pretend_mysql', [
+            'driver' => 'mysql',
+            'host' => '127.0.0.1',
+            'database' => 'pretend',
+            'username' => 'pretend',
+            'password' => '',
+            'prefix' => '',
+        ]);
+
+        $original = DB::getDefaultConnection();
+        DB::setDefaultConnection('pretend_mysql');
+
+        try {
+            $queries = DB::connection()->pretend(fn () => $this->credentialsMigration()->up());
+        } finally {
+            DB::setDefaultConnection($original);
+        }
+
+        $this->assertSame(
+            ['alter table `ai_systems` modify `credentials` text null'],
+            array_column($queries, 'query'),
+        );
+    }
+
+    public function test_credentials_are_stored_encrypted_and_read_back(): void
+    {
+        $system = $this->systemWithSecrets();
+
+        $raw = DB::table('ai_systems')->where('id', $system->id)->value('credentials');
+
+        $this->assertIsString($raw);
+        $this->assertNull(json_decode($raw, true));
+        $this->assertStringNotContainsString('shh', $raw);
+        $this->assertSame(['client_secret' => 'shh'], $system->fresh()->credentials);
+    }
+
+    public function test_a_system_without_credentials_stores_null(): void
+    {
+        $system = $this->manager()->create($this->validAttributes());
+
+        $this->assertNull(DB::table('ai_systems')->where('id', $system->id)->value('credentials'));
+        $this->assertNull($system->fresh()->credentials);
+    }
+
+    public function test_credentials_stored_before_the_column_change_survive_it(): void
+    {
+        Schema::table('ai_systems', fn ($table) => $table->json('credentials')->nullable()->change());
+
+        $system = $this->systemWithSecrets();
+
+        $this->credentialsMigration()->up();
+
+        $this->assertSame(['client_secret' => 'shh'], $system->fresh()->credentials);
+    }
+
+    public function test_a_system_created_without_a_role_is_a_chat_system(): void
+    {
+        $system = $this->manager()->create($this->validAttributes());
+
+        $this->assertSame(AiSystemRole::Chat, $system->fresh()->role);
+    }
+
+    public function test_an_audio_system_needs_only_a_provider_and_a_key(): void
+    {
+        $system = $this->manager()->create([
+            'name' => 'Narrator',
+            'provider' => 'elevenlabs',
+            'role' => 'audio',
+            'api_key' => 'xi-test',
+        ]);
+
+        $fresh = $system->fresh();
+        $this->assertSame(AiSystemRole::Audio, $fresh->role);
+        $this->assertSame('', $fresh->model);
+        $this->assertSame('xi-test', $fresh->api_key);
+    }
+
+    public function test_a_chat_system_still_requires_a_model_and_max_tokens(): void
+    {
+        try {
+            $this->manager()->create(['name' => 'Chat', 'provider' => 'openai', 'api_key' => 'sk']);
+            $this->fail('A chat system was created without a model.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('model', $e->errors());
+            $this->assertArrayHasKey('max_tokens', $e->errors());
+        }
+    }
+
+    public function test_a_provider_that_cannot_serve_the_role_is_rejected_naming_both(): void
+    {
+        foreach (['lm-studio', 'openai-compatible'] as $provider) {
+            foreach (['audio', 'transcription'] as $role) {
+                try {
+                    $this->manager()->create([
+                        'name' => 'Local voice',
+                        'provider' => $provider,
+                        'role' => $role,
+                    ]);
+                    $this->fail("{$provider} was accepted for {$role}.");
+                } catch (ValidationException $e) {
+                    $this->assertSame(
+                        ["The {$provider} provider cannot serve the {$role} role."],
+                        $e->errors()['role'],
+                    );
+                }
+            }
+        }
+
+        $this->assertSame(0, AiSystem::count());
+    }
+
+    public function test_an_audio_only_provider_is_rejected_for_chat_even_when_no_role_is_given(): void
+    {
+        try {
+            $this->manager()->create($this->validAttributes(['provider' => 'elevenlabs']));
+            $this->fail('ElevenLabs was accepted as a chat system.');
+        } catch (ValidationException $e) {
+            $this->assertSame(
+                ['The elevenlabs provider cannot serve the chat role.'],
+                $e->errors()['provider'],
+            );
+        }
+    }
+
+    public function test_an_unknown_role_is_rejected(): void
+    {
+        try {
+            $this->manager()->create($this->validAttributes(['role' => 'video']));
+            $this->fail('An unknown role was accepted.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('role', $e->errors());
+        }
+    }
+
+    public function test_an_elevenlabs_system_requires_an_api_key(): void
+    {
+        try {
+            $this->manager()->create(['name' => 'Narrator', 'provider' => 'elevenlabs', 'role' => 'audio']);
+            $this->fail('An ElevenLabs system was created without a key.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('api_key', $e->errors());
+        }
+    }
+
+    public function test_every_capable_provider_is_accepted_for_a_voice_role(): void
+    {
+        foreach (['openai', 'gemini', 'elevenlabs'] as $provider) {
+            foreach (['audio', 'transcription'] as $role) {
+                $system = $this->manager()->create([
+                    'name' => "{$provider} {$role}",
+                    'provider' => $provider,
+                    'role' => $role,
+                    'api_key' => 'key',
+                ]);
+
+                $this->assertSame($role, $system->fresh()->role->value);
+            }
+        }
+    }
+
+    public function test_an_update_cannot_move_a_system_to_a_role_its_provider_cannot_serve(): void
+    {
+        $system = $this->manager()->create($this->validAttributes());
+
+        try {
+            $this->manager()->update($system, ['name' => 'Test System', 'max_tokens' => 1024, 'role' => 'audio']);
+            $this->fail('An Anthropic system was moved to the audio role.');
+        } catch (ValidationException $e) {
+            $this->assertSame(['The anthropic provider cannot serve the audio role.'], $e->errors()['role']);
+        }
+
+        $this->assertSame(AiSystemRole::Chat, $system->fresh()->role);
+    }
+
+    public function test_an_update_that_omits_the_role_keeps_it(): void
+    {
+        $system = $this->manager()->create([
+            'name' => 'Narrator',
+            'provider' => 'elevenlabs',
+            'role' => 'audio',
+            'api_key' => 'xi-test',
+        ]);
+
+        // No max_tokens: it means nothing to a voice system, so it is not demanded of one.
+        $this->manager()->update($system, ['name' => 'Renamed']);
+
+        $fresh = $system->fresh();
+        $this->assertSame('Renamed', $fresh->name);
+        $this->assertSame(AiSystemRole::Audio, $fresh->role);
+    }
+
+    public function test_providers_are_listed_by_the_role_they_can_serve(): void
+    {
+        $this->assertSame(['openai', 'gemini', 'elevenlabs'], AiSystemManager::providersFor(AiSystemRole::Audio));
+        $this->assertSame(['openai', 'gemini', 'elevenlabs'], AiSystemManager::providersFor(AiSystemRole::Transcription));
+        $this->assertSame(
+            ['anthropic', 'openai', 'openai-compatible', 'lm-studio', 'gemini', 'grok'],
+            AiSystemManager::providersFor(AiSystemRole::Chat),
+        );
+    }
+
+    public function test_listing_models_for_a_voice_only_provider_returns_none(): void
+    {
+        Http::preventStrayRequests();
+
+        $this->assertSame([], $this->manager()->availableModels(AiProvider::ElevenLabs, 'xi-test'));
     }
 }

@@ -4,7 +4,9 @@ namespace Jvjvjv\CodeTalker\Services\LaravelAi;
 
 use Illuminate\Support\Arr;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
+use Jvjvjv\CodeTalker\Enums\AiSystemRole;
 use Jvjvjv\CodeTalker\Models\AiSystem;
+use Jvjvjv\CodeTalker\Services\AiSystemResolver;
 use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Providers\Tools\WebSearch;
 use Stringable;
@@ -16,6 +18,7 @@ class AgentFactory
 {
     public function __construct(
         protected AiSystemProviderConfigurator $configurator,
+        protected AiSystemResolver $resolver = new AiSystemResolver(),
     ) {
     }
 
@@ -94,17 +97,7 @@ class AgentFactory
      */
     public function systemForFeature(string $feature): AiSystem
     {
-        $system = AiSystem::defaultForFeature($feature);
-
-        if ($system === null) {
-            throw new \RuntimeException("No default AI system configured for feature: {$feature}");
-        }
-
-        if (!$system->is_active) {
-            throw new \RuntimeException("The default AI system for feature '{$feature}' is inactive.");
-        }
-
-        return $system;
+        return $this->resolver->forFeature($feature, AiSystemRole::Chat);
     }
 
     protected function supportsWebSearch(AiProvider $provider): bool

@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
+use Jvjvjv\CodeTalker\Enums\AiSystemRole;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiSystemFeatureDefault;
 use Jvjvjv\CodeTalker\Models\AiSystemPrompt;
@@ -39,9 +40,20 @@ class AiSystemManager
     public static function createRules(array $data = []): array
     {
         $provider = AiProvider::tryFrom((string) ($data['provider'] ?? ''));
+        $role = AiSystemRole::tryFrom((string) ($data['role'] ?? AiSystemRole::Chat->value));
+        $isVoice = $role !== null && $role !== AiSystemRole::Chat;
 
-        return array_merge([
-            'provider' => ['required', 'string', Rule::in(AiProvider::values())],
+        // A pair the provider cannot serve is reported on `role` when one was
+        // submitted, and on `provider` when the chat default was assumed.
+        $pairRule = static::providerRoleRule($provider, $role);
+        $roleGiven = array_key_exists('role', $data);
+
+        return array_merge(static::sharedRules(), [
+            'provider' => array_merge(
+                ['required', 'string', Rule::in(AiProvider::values())],
+                $roleGiven ? [] : [$pairRule],
+            ),
+            'role' => ['sometimes', 'string', Rule::in(AiSystemRole::values()), $pairRule],
             // Local and self-hosted endpoints authenticate by network position
             // rather than a key, so requiring one would make them unusable.
             'api_key' => [
@@ -49,8 +61,11 @@ class AiSystemManager
                 'nullable',
                 'string',
             ],
-            'model' => ['required', 'string', 'max:255'],
-        ], static::sharedRules());
+            // A voice system may leave the model blank to use the provider's
+            // default, and has no use for a token limit.
+            'model' => [$isVoice ? 'nullable' : 'required', 'string', 'max:255'],
+            'max_tokens' => [$isVoice ? 'nullable' : 'required', 'integer', 'min:1', 'max:200000'],
+        ]);
     }
 
     /**
@@ -58,11 +73,58 @@ class AiSystemManager
      * immutable once a system exists, because changing them invalidates the
      * stored capability flags without any way to detect it.
      *
+     * @param AiSystem|null $system the system being updated; with it, a new
+     *        `role` is checked against the stored provider, and a voice
+     *        system is not asked for a token limit
      * @return array<string, mixed>
      */
-    public static function updateRules(): array
+    public static function updateRules(?AiSystem $system = null): array
     {
-        return static::sharedRules();
+        $rules = static::sharedRules();
+        $rules['role'] = ['sometimes', 'string', Rule::in(AiSystemRole::values())];
+
+        if ($system === null) {
+            return $rules;
+        }
+
+        $rules['role'][] = static::providerRoleRule(AiProvider::tryFrom((string) $system->provider));
+
+        if ($system->role !== AiSystemRole::Chat) {
+            $rules['max_tokens'] = ['nullable', 'integer', 'min:1', 'max:200000'];
+        }
+
+        return $rules;
+    }
+
+    /**
+     * The providers able to serve a role, for a provider chooser that follows
+     * the role selected.
+     *
+     * @return array<int, string>
+     */
+    public static function providersFor(AiSystemRole $role): array
+    {
+        return array_values(array_map(
+            static fn (AiProvider $provider): string => $provider->value,
+            array_filter(AiProvider::cases(), static fn (AiProvider $provider): bool => $provider->supportsRole($role)),
+        ));
+    }
+
+    /**
+     * Rejects a provider/role pair laravel/ai has no gateway for. Without it
+     * the record saves and fails at the first call, from inside the gateway.
+     *
+     * With no role given, the role is read from the value under validation.
+     */
+    protected static function providerRoleRule(?AiProvider $provider, ?AiSystemRole $role = null): \Closure
+    {
+        return static function (string $attribute, mixed $value, \Closure $fail) use ($provider, $role): void {
+            $role ??= is_string($value) ? AiSystemRole::tryFrom($value) : null;
+
+            if ($provider !== null && $role !== null && !$provider->supportsRole($role)) {
+                $fail("The {$provider->value} provider cannot serve the {$role->value} role.");
+            }
+        };
     }
 
     /**
@@ -178,6 +240,15 @@ class AiSystemManager
         $this->capabilities->normalizeForPersistence($data);
         $this->capabilities->hydrateForPersistence($data);
 
+        // Neither column is nullable. A voice system may omit both: a blank
+        // model means the provider's default, and the token limit falls back
+        // to the column default.
+        $data['model'] ??= '';
+
+        if (($data['max_tokens'] ?? null) === null) {
+            unset($data['max_tokens']);
+        }
+
         $system = AiSystem::create($data);
 
         $this->syncFeatureDefaults($system, $featureDefaults);
@@ -190,7 +261,7 @@ class AiSystemManager
      */
     public function update(AiSystem $system, array $data): AiSystem
     {
-        $data = Validator::make($data, static::updateRules())->validate();
+        $data = Validator::make($data, static::updateRules($system))->validate();
 
         $featureDefaults = $data['feature_defaults'] ?? [];
         unset($data['feature_defaults']);
@@ -213,6 +284,10 @@ class AiSystemManager
         $this->capabilities->hydrateForPersistence($data);
 
         unset($data['provider'], $data['model']);
+
+        if (array_key_exists('max_tokens', $data) && $data['max_tokens'] === null) {
+            unset($data['max_tokens']);
+        }
 
         $system->update($data);
 
