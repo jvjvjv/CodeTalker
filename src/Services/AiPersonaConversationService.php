@@ -174,7 +174,6 @@ class AiPersonaConversationService
             $userMessage,
         ));
 
-        $translator = new StreamTranslator();
         $blocks = new ResponseBlocks();
 
         try {
@@ -185,6 +184,10 @@ class AiPersonaConversationService
                 tools: $this->toolsFor($conversation),
                 temperature: $temperature,
             );
+
+            // Built from the agent so the system's thinking level decides, for
+            // every provider, whether reasoning reaches the turn's events.
+            $translator = new StreamTranslator(showReasoning: $agent->showThinking());
 
             yield [
                 'type' => 'status',

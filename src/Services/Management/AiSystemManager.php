@@ -8,10 +8,12 @@ use Illuminate\Validation\Rule;
 use InvalidArgumentException;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Enums\AiSystemRole;
+use Jvjvjv\CodeTalker\Enums\ThinkingLevel;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiSystemFeatureDefault;
 use Jvjvjv\CodeTalker\Models\AiSystemPrompt;
 use Jvjvjv\CodeTalker\Services\AiSystemCapabilityService;
+use Jvjvjv\CodeTalker\Services\LaravelAi\Thinking\ThinkingResolver;
 use Jvjvjv\CodeTalker\Services\ProviderModelsClient;
 
 /**
@@ -29,6 +31,7 @@ class AiSystemManager
     public function __construct(
         private AiSystemCapabilityService $capabilities,
         private ProviderModelsClient $providerModels,
+        private ThinkingResolver $thinking = new ThinkingResolver(),
     ) {
     }
 
@@ -163,6 +166,9 @@ class AiSystemManager
             'allowed_tools.*' => ['string', 'max:255'],
             'web_tool_policy' => ['nullable', 'json', static::webToolPolicyRule()],
             'supports_json_mode' => ['boolean'],
+            'thinking_level' => ['nullable', Rule::enum(ThinkingLevel::class)],
+            // @deprecated Accepted for one release and translated to
+            // thinking_level when no level is submitted.
             'enable_thinking' => ['nullable', 'boolean'],
             'is_local_endpoint' => ['boolean'],
             // @deprecated Slated for removal from AiSystem entirely.
@@ -271,6 +277,7 @@ class AiSystemManager
 
         $this->resolveCustomSystemPrompt($data);
         $this->decodeJsonFields($data);
+        $this->resolveThinkingLevel($data);
         $this->capabilities->normalizeForPersistence($data);
         $this->capabilities->hydrateForPersistence($data);
 
@@ -302,6 +309,7 @@ class AiSystemManager
 
         $this->resolveCustomSystemPrompt($data);
         $this->decodeJsonFields($data);
+        $this->resolveThinkingLevel($data);
 
         // Both are hidden from serialization, so an edit form cannot prefill
         // them and posts them blank. Blank therefore means "unchanged", never
@@ -469,6 +477,45 @@ class AiSystemManager
     }
 
     /**
+     * The thinking levels a provider and model can honor, for a level selector.
+     *
+     * When `controls_effort` is false the package sends no reasoning parameter
+     * for this pair, so the level only decides whether reasoning is shown and
+     * `levels` is just `off` and `medium`: render it as a show/hide control.
+     * `off` is always offered for chat, because even a model that cannot stop
+     * reasoning has its reasoning hidden at `off`. A provider that cannot
+     * serve chat has no levels at all.
+     *
+     * @param array<string, mixed>|null $modelCapabilities as stored on the system
+     *        (LM Studio's `reasoning` flag decides whether its level is sent)
+     * @return array{levels: array<int, string>, controls_effort: bool}
+     */
+    public function thinkingLevels(AiProvider|string $provider, string $model, ?array $modelCapabilities = null): array
+    {
+        $provider = $provider instanceof AiProvider ? $provider : AiProvider::from($provider);
+
+        $profile = $this->thinking->profileFor($provider, new AiSystem([
+            'provider' => $provider->value,
+            'model' => $model,
+            'model_capabilities' => $modelCapabilities,
+        ]));
+
+        if (!$profile->available) {
+            return ['levels' => [], 'controls_effort' => false];
+        }
+
+        $levels = $profile->controlsEffort ? $profile->levels : [ThinkingLevel::Medium];
+
+        return [
+            'levels' => [
+                ThinkingLevel::Off->value,
+                ...array_map(static fn (ThinkingLevel $level): string => $level->value, $levels),
+            ],
+            'controls_effort' => $profile->controlsEffort,
+        ];
+    }
+
+    /**
      * Turn free-text prompt content into a real AiSystemPrompt when no existing
      * prompt was chosen, so the system has something to reference.
      *
@@ -499,6 +546,34 @@ class AiSystemManager
      *
      * @param array<string, mixed> $data
      */
+    /**
+     * Reconcile `thinking_level` with the deprecated `enable_thinking`. A
+     * submitted level wins; a lone flag is translated. Either way both columns
+     * are written to agree, so a rollback to a version that only reads
+     * `enable_thinking` still sees the right value. Submitting neither leaves
+     * both untouched, which on update keeps the stored level.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function resolveThinkingLevel(array &$data): void
+    {
+        if (array_key_exists('thinking_level', $data)) {
+            $level = $data['thinking_level'] instanceof ThinkingLevel || $data['thinking_level'] === null
+                ? $data['thinking_level']
+                : ThinkingLevel::from($data['thinking_level']);
+        } elseif (array_key_exists('enable_thinking', $data)) {
+            $flag = $data['enable_thinking'] === null
+                ? null
+                : filter_var($data['enable_thinking'], FILTER_VALIDATE_BOOLEAN);
+            $level = ThinkingLevel::fromLegacyFlag($flag);
+        } else {
+            return;
+        }
+
+        $data['thinking_level'] = $level?->value;
+        $data['enable_thinking'] = $level?->isOn();
+    }
+
     private function decodeJsonFields(array &$data): void
     {
         foreach (['config', 'credentials', 'pricing_profile', 'web_tool_policy'] as $field) {
