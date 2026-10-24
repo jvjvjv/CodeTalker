@@ -23,6 +23,11 @@ use Laravel\Ai\Streaming\Events\TextDelta;
  *
  * One translator instance spans one browser turn: keep it across max-token
  * continuation attempts and call finish() once, after the last attempt.
+ *
+ * With $showReasoning false, reasoning deltas are dropped rather than
+ * translated. Providers can return reasoning that was never asked for (local
+ * models, or an `off` that had to be sent as the lowest effort), so not
+ * requesting it is not enough to keep it out of the turn.
  */
 class StreamTranslator
 {
@@ -38,7 +43,7 @@ class StreamTranslator
 
     private Usage $usage;
 
-    public function __construct()
+    public function __construct(private readonly bool $showReasoning = true)
     {
         $this->usage = new Usage();
     }
@@ -56,10 +61,10 @@ class StreamTranslator
                 'type' => 'content_block_delta',
                 'delta' => ['text' => $event->delta],
             ]],
-            $event instanceof ReasoningDelta => [[
+            $event instanceof ReasoningDelta => $this->showReasoning ? [[
                 'type' => 'reasoning_block_delta',
                 'delta' => ['reasoning' => $event->delta],
-            ]],
+            ]] : [],
             $event instanceof StreamEnd => $this->onStreamEnd($event),
             $event instanceof Error => [[
                 'type' => 'error',

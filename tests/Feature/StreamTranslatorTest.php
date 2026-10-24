@@ -41,6 +41,17 @@ class StreamTranslatorTest extends TestCase
         );
     }
 
+    public function test_reasoning_is_dropped_when_it_may_not_be_shown(): void
+    {
+        $translator = new StreamTranslator(showReasoning: false);
+
+        $this->assertSame([], $translator->translate(new ReasoningDelta('e2', 'r1', 'Thinking...', time())));
+        $this->assertSame(
+            [['type' => 'content_block_delta', 'delta' => ['text' => 'Hello']]],
+            $translator->translate(new TextDelta('e1', 'm1', 'Hello', time())),
+        );
+    }
+
     public function test_emits_exactly_one_message_start_across_multiple_stream_starts(): void
     {
         $translator = new StreamTranslator();

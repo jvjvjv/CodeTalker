@@ -7,6 +7,7 @@ use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Enums\AiSystemRole;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\AiSystemResolver;
+use Jvjvjv\CodeTalker\Services\LaravelAi\Thinking\ThinkingResolver;
 use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Providers\Tools\WebSearch;
 use Stringable;
@@ -19,6 +20,7 @@ class AgentFactory
     public function __construct(
         protected AiSystemProviderConfigurator $configurator,
         protected AiSystemResolver $resolver = new AiSystemResolver(),
+        protected ThinkingResolver $thinking = new ThinkingResolver(),
     ) {
     }
 
@@ -59,6 +61,7 @@ class AgentFactory
         }
 
         $resolvedMaxTokens = $maxTokens ?? $system->max_tokens;
+        $thinking = $this->thinking->resolve($provider, $system, $resolvedMaxTokens);
 
         return new CodeTalkerAgent(
             providerName: $providerName,
@@ -70,8 +73,8 @@ class AgentFactory
             temperature: $temperature ?? ($system->temperature !== null ? (float) $system->temperature : null),
             maxSteps: $maxSteps,
             timeout: $this->timeoutFor($provider, $system),
-            providerOptions: $this->providerOptionsFor($provider, $system, $resolvedMaxTokens),
-            showThinking: (bool) $system->enable_thinking,
+            providerOptions: $this->providerOptionsFor($system, $thinking->options),
+            showThinking: $thinking->showReasoning,
         );
     }
 
@@ -125,31 +128,11 @@ class AgentFactory
     }
 
     /**
+     * @param array<string, mixed> $thinkingOptions
      * @return array<string, mixed>
      */
-    protected function providerOptionsFor(AiProvider $provider, AiSystem $system, ?int $maxTokens): array
+    protected function providerOptionsFor(AiSystem $system, array $thinkingOptions): array
     {
-        $options = [];
-
-        if (
-            $provider === AiProvider::Anthropic
-            && $system->enable_thinking
-            && $maxTokens !== null
-            && $maxTokens > 1024
-        ) {
-            $options['thinking'] = ['type' => 'enabled', 'budget_tokens' => 1024];
-        }
-
-        // Best-effort: LM Studio's native REST API accepts a `reasoning`
-        // request field ("off"/"low"/"medium"/"high"/"on") and errors if the
-        // model doesn't support it. Only send it for models LM Studio itself
-        // reported as reasoning-capable, and only as a hint — the gateway's
-        // showThinking() gate is what reliably keeps disabled reasoning out
-        // of the chat UI regardless of whether the model server honors this.
-        if ($provider === AiProvider::LmStudio && Arr::get($system->model_capabilities ?? [], 'reasoning') === true) {
-            $options['reasoning'] = $system->enable_thinking ? 'on' : 'off';
-        }
-
         // Raw provider-parameter passthrough (e.g. lm-studio's frequency_penalty,
         // repeat_penalty, top_k, seed, stop). `model` and `messages` are excluded
         // because they carry the actual request routing/content, built just
@@ -163,6 +146,6 @@ class AgentFactory
             ['model', 'messages', 'stream', 'tools', 'tool_choice'],
         );
 
-        return array_merge($options, $passthrough);
+        return array_merge($thinkingOptions, $passthrough);
     }
 }

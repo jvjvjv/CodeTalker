@@ -227,7 +227,8 @@ An `AiSystem` record represents a fully configured provider endpoint. Create one
 | `max_tokens`       | Maximum output tokens per request                                                 |
 | `temperature`      | Sampling temperature (overrides persona-level default)                            |
 | `context_length`   | Context window for local models (LM Studio)                                       |
-| `enable_thinking`  | Enable extended thinking / reasoning output (Anthropic)                           |
+| `thinking_level`   | How much the model reasons: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or unset for the provider default — see [Thinking levels](#thinking-levels) |
+| `enable_thinking`  | **Deprecated.** Use `thinking_level`. Still accepted, and translated (`true` → `medium`, `false` → `off`) |
 | `allowed_tools`    | Array of tool names the model may invoke                                          |
 | `web_tool_policy`  | Domain allow-list and credentials for `fetch-web-page`/`http-request` — see below. Stored encrypted; omitted from serialized output |
 | `system_prompt_id` | Optional FK to an `AiSystemPrompt` record                                         |
@@ -269,6 +270,79 @@ The agent runs on laravel/ai, so everything from the
 [laravel/ai documentation](https://laravel.com/docs/13.x/ai-sdk) — streaming,
 tool use, structured output — applies. Prior versions returned an
 `AiClientContract` from `AiClientFactory`; both were removed in 0.6.0.
+
+### Thinking levels
+
+`thinking_level` sets how much a system's model reasons before it answers, on one
+scale for every provider:
+
+`off` < `minimal` < `low` < `medium` < `high` < `xhigh` < `max`
+
+Leave it unset to send no reasoning parameter at all and take the provider's
+default. The package translates the level into each provider's own request:
+
+| Provider            | What is sent                                                                                       |
+| ------------------- | -------------------------------------------------------------------------------------------------- |
+| `anthropic`         | Claude 4.6 and later: adaptive thinking plus `output_config.effort`. Claude 3.7 – 4.5: `thinking.budget_tokens` scaled by level (1024 to 32768, always below `max_tokens`; nothing when `max_tokens` ≤ 1024). |
+| `openai`            | `reasoning.effort`, plus `reasoning.summary: auto` so reasoning can stream. `off` is sent as `none` on GPT-5.1 and later. |
+| `grok`              | `reasoning.effort` for grok-3-mini only (`low` or `high`). Other Grok models always reason and reject the field. |
+| `gemini`            | `thinkingConfig.thinkingLevel` on Gemini 3, `thinkingConfig.thinkingBudget` on Gemini 2.5, with `includeThoughts`. |
+| `lm-studio`         | LM Studio's native `reasoning` field, only for models LM Studio reports as reasoning-capable.      |
+| `openai-compatible` | Nothing — these endpoints share no standard. Send your endpoint's field through `config.provider_options`. |
+
+**When a model does not offer a level**, the nearest lower one it does offer is sent
+(or the nearest higher one, if there is nothing lower). `xhigh` on a model that
+stops at `high` is sent as `high`.
+
+**`off` does not always stop reasoning.** Some current models cannot turn
+thinking off (Claude Opus 5.5 and Sonnet 5.5, GPT-5, the o-series, Gemini 3,
+Gemini 2.5 Pro). For those, `off` is sent as the model's lowest level and the
+reasoning is hidden. You are still billed for it.
+
+**Reasoning is shown only above `off`.** At `off`, or with no level set,
+reasoning never reaches the [turn events](#turn-events) or the stored reply, even
+when the provider returns it anyway. Raw provider exchange logs, when enabled,
+still record it, and so does `AiLlmMessage` for every provider except `lm-studio`
+and `openai-compatible`, which drop hidden reasoning before it is logged.
+
+Model families are recognized from the model id. An id the package does not
+recognize is treated as that provider's newest family (for Grok, as a model that
+takes no effort). To override what is sent, set the same key in
+`config.provider_options`, which is merged last. The merge is one level deep, so
+overriding `output_config` replaces the effort the level produced:
+
+```php
+'config' => ['provider_options' => ['output_config' => ['effort' => 'max']]],
+```
+
+#### A level selector in your admin UI
+
+`AiSystemManager::thinkingLevels()` returns the levels a provider and model can
+actually honor, so you can replace a thinking checkbox with a selector that offers
+only valid choices:
+
+```php
+use Jvjvjv\CodeTalker\Services\Management\AiSystemManager;
+
+$options = app(AiSystemManager::class)->thinkingLevels(
+    $system->provider,
+    $system->model,
+    $system->model_capabilities, // LM Studio's `reasoning` flag decides whether its level is sent
+);
+
+// ['levels' => ['off', 'low', 'medium', 'high', 'xhigh', 'max'], 'controls_effort' => true]
+```
+
+- `controls_effort: true` — render `levels` as a selector. `off` is always listed,
+  because it hides reasoning even where it cannot stop it.
+- `controls_effort: false` — the package sends no reasoning parameter for this
+  pair, so `levels` is just `['off', 'medium']` and only decides whether reasoning
+  is shown. Render it as a show/hide toggle.
+- An empty `levels` (voice-only providers) — hide the control.
+
+Add an "unset" choice to the selector if you want to offer the provider default.
+Submit the choice as `thinking_level`; `AiSystemManager::createRules()` and
+`updateRules()` validate it, and an update that omits it keeps the stored level.
 
 ### Feature defaults
 
@@ -1208,7 +1282,7 @@ or tests, under `Jvjvjv\CodeTalker\Services\Management`.
 
 | Service                 | Responsibilities                                                                            |
 | ----------------------- | ------------------------------------------------------------------------------------------- |
-| `AiSystemManager`       | Create/update/delete/duplicate systems, sync feature defaults, list provider models          |
+| `AiSystemManager`       | Create/update/delete/duplicate systems, sync feature defaults, list provider models and thinking levels |
 | `AiSystemPromptManager` | Reusable system prompt CRUD, clearing references on delete                                   |
 | `AiPersonaManager`      | Persona CRUD, per-persona usage rollups, available systems, available tools                  |
 | `AiOperatorManager`     | Operator CRUD, per-operator run/usage rollups, available tools                               |

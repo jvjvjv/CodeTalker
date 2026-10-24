@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Jvjvjv\CodeTalker\Enums\AiSystemRole;
+use Jvjvjv\CodeTalker\Enums\ThinkingLevel;
 
 class AiSystem extends Model
 {
@@ -39,7 +40,10 @@ class AiSystem extends Model
         'allowed_tools',
         'web_tool_policy',
         'supports_json_mode',
+        // @deprecated Superseded by `thinking_level`. Still written alongside
+        // it by AiSystemManager so a rollback reads the right value.
         'enable_thinking',
+        'thinking_level',
         'is_local_endpoint',
         // @deprecated Slated for removal — a host-configured pricing
         // override is redundant with the provider-level pricing config
@@ -78,7 +82,9 @@ class AiSystem extends Model
             'allowed_tools' => 'array',
             'web_tool_policy' => 'encrypted:array',
             'supports_json_mode' => 'boolean',
+            /** @deprecated See the `$fillable` entry above. */
             'enable_thinking' => 'boolean',
+            'thinking_level' => ThinkingLevel::class,
             'is_local_endpoint' => 'boolean',
             'temperature' => 'decimal:2',
             'max_tokens' => 'integer',
@@ -95,6 +101,23 @@ class AiSystem extends Model
     public function scopeRole($query, AiSystemRole $role)
     {
         return $query->where('role', $role->value);
+    }
+
+    /**
+     * The level this system thinks at. Falls back to the deprecated
+     * `enable_thinking` flag when no level is stored or the column is not
+     * loaded (a partial select, or a host that has not run the migration),
+     * so an unmigrated system keeps thinking as it did.
+     */
+    public function thinkingLevel(): ?ThinkingLevel
+    {
+        $level = $this->getAttribute('thinking_level');
+
+        if ($level instanceof ThinkingLevel) {
+            return $level;
+        }
+
+        return ThinkingLevel::fromLegacyFlag($this->getAttribute('enable_thinking'));
     }
 
     public static function defaultForFeature(string $feature): ?self
