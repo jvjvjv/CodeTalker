@@ -285,7 +285,7 @@ default. The package translates the level into each provider's own request:
 | Provider            | What is sent                                                                                       |
 | ------------------- | -------------------------------------------------------------------------------------------------- |
 | `anthropic`         | Claude 4.6 and later: adaptive thinking plus `output_config.effort`. Claude 3.7 – 4.5: `thinking.budget_tokens` scaled by level (1024 to 32768, always below `max_tokens`; nothing when `max_tokens` ≤ 1024). |
-| `openai`            | `reasoning.effort`, plus `reasoning.summary: auto` so reasoning can stream. `off` is sent as `none` on GPT-5.1 and later. |
+| `openai`            | `reasoning.effort`, plus `reasoning.summary: auto` so reasoning can stream. `off` is sent as `none` on GPT-5.1 and later, except their Pro and Codex variants. |
 | `grok`              | `reasoning.effort` for grok-3-mini only (`low` or `high`). Other Grok models always reason and reject the field. |
 | `gemini`            | `thinkingConfig.thinkingLevel` on Gemini 3, `thinkingConfig.thinkingBudget` on Gemini 2.5, with `includeThoughts`. |
 | `lm-studio`         | LM Studio's native `reasoning` field, only for models LM Studio reports as reasoning-capable.      |
@@ -296,8 +296,8 @@ default. The package translates the level into each provider's own request:
 stops at `high` is sent as `high`.
 
 **`off` does not always stop reasoning.** Some current models cannot turn
-thinking off (Claude Opus 5.5 and Sonnet 5.5, GPT-5, the o-series, Gemini 3,
-Gemini 2.5 Pro). For those, `off` is sent as the model's lowest level and the
+thinking off (Claude Opus 5.5 and Sonnet 5.5, GPT-5, GPT-5.x Pro and Codex, the
+o-series, Gemini 3, Gemini 2.5 Pro). For those, `off` is sent as the model's lowest level and the
 reasoning is hidden. You are still billed for it.
 
 **Reasoning is shown only above `off`.** At `off`, or with no level set,

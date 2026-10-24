@@ -9,8 +9,9 @@ use Jvjvjv\CodeTalker\Models\AiSystem;
  * Gemini takes a `thinkingConfig` inside `generationConfig` (laravel/ai merges
  * provider options there), in one of two shapes:
  *
- * - Gemini 3: `thinkingLevel`. Pro takes low and high; Flash also takes
- *   minimal and medium. Neither stops thinking entirely.
+ * - Gemini 3: `thinkingLevel`. 3 Pro takes low and high, 3.1 Pro adds
+ *   medium, and Flash takes minimal through high. None stops thinking
+ *   entirely.
  * - Gemini 2.5: `thinkingBudget` in tokens. Flash accepts `0` to turn
  *   thinking off; Pro has a floor and cannot.
  *
@@ -37,6 +38,10 @@ class GeminiThinking implements ThinkingMapper
         return match (true) {
             $this->isLevelModel($model) && str_contains($model, 'flash') => ThinkingProfile::effort(
                 [ThinkingLevel::Minimal, ThinkingLevel::Low, ThinkingLevel::Medium, ThinkingLevel::High],
+                canDisable: false,
+            ),
+            str_starts_with($model, 'gemini-3.1-pro') => ThinkingProfile::effort(
+                [ThinkingLevel::Low, ThinkingLevel::Medium, ThinkingLevel::High],
                 canDisable: false,
             ),
             $this->isBudgetModel($model) => ThinkingProfile::effort(

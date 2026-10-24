@@ -9,8 +9,9 @@ use Jvjvjv\CodeTalker\Models\AiSystem;
  * OpenAI and xAI both serve chat through the Responses API, which takes
  * `reasoning.effort`. They differ in which models accept which efforts:
  *
- * - OpenAI: GPT-5.1 and later accept `none`, which is how `off` is sent;
- *   GPT-5 and the o-series cannot stop reasoning. Non-reasoning models
+ * - OpenAI: GPT-5.1 and later accept `none`, which is how `off` is sent,
+ *   except their Pro and Codex variants; those, GPT-5 and the o-series
+ *   cannot stop reasoning. GPT-5.2 Pro starts at `medium`. Non-reasoning models
  *   (GPT-4.x, `gpt-5-chat`) reject the field, so they get visibility only.
  *   An unrecognised id gets low/medium/high, which every reasoning model takes.
  * - xAI: only grok-3-mini takes an effort (low or high). The grok-4 family
@@ -43,6 +44,12 @@ class OpenAiThinking implements ThinkingMapper
             ['/^gpt-5-chat/', null, false],
             ['/^gpt-5-pro/', ['high'], false],
             ['/^gpt-5-codex/', $standard, false],
+            // Pro and Codex variants of GPT-5.1 and later do not take `none`,
+            // so they are matched before the base rules that do.
+            ['/^gpt-5\.\d+-pro/', ['medium', 'high', 'xhigh'], false],
+            ['/^gpt-5\.1-codex-max/', [...$standard, 'xhigh'], false],
+            ['/^gpt-5\.1-codex/', $standard, false],
+            ['/^gpt-5\.\d+-codex/', [...$standard, 'xhigh'], false],
             ['/^gpt-5\.1/', $standard, true],
             ['/^gpt-5\.\d+/', [...$standard, 'xhigh'], true],
             ['/^gpt-5/', ['minimal', ...$standard], false],

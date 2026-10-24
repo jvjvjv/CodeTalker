@@ -878,6 +878,12 @@ class AiSystemManagerTest extends TestCase
         $this->assertTrue($levels['controls_effort']);
     }
 
+    public function test_thinking_levels_follow_the_model_variant(): void
+    {
+        $this->assertSame(['off', 'medium', 'high', 'xhigh'], $this->manager()->thinkingLevels('openai', 'gpt-5.2-pro')['levels']);
+        $this->assertSame(['off', 'low', 'medium', 'high'], $this->manager()->thinkingLevels('gemini', 'gemini-3.1-pro-preview')['levels']);
+    }
+
     public function test_thinking_levels_for_a_visibility_only_provider(): void
     {
         $expected = ['levels' => ['off', 'medium'], 'controls_effort' => false];
