@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.19.0] — 2026-10-24
+
+`AiSystem` records now set a graded thinking level instead of switching thinking on or off, and each provider receives the reasoning request its model accepts.
+
+### Breaking Changes
+- A new migration adds `ai_systems.thinking_level` and fills it from `enable_thinking`: `true` becomes `medium`, `false` becomes `off`, and an unset flag leaves the level unset. Re-publish migrations and run them.
+- `enable_thinking` is deprecated in favor of `thinking_level`. `AiSystemManager` still accepts it, translating it when no `thinking_level` is submitted, and it will be removed in a later release.
+- Reasoning now reaches turn events and the stored reply only when a system's thinking level is above `off`. A system with no level, which previously showed any reasoning Anthropic, OpenAI or Gemini returned, now shows none.
+- An Anthropic system with thinking enabled now sends adaptive thinking at `medium` effort on Claude 4.6 and later, and a 4096-token budget on Claude 3.7 through 4.5, instead of a fixed 1024-token budget. Set `thinking_level` to `low` to spend less.
+- `AgentFactory::providerOptionsFor()` now takes the system and the resolved thinking options. A subclass that overrides it must update its signature.
+
+### New Features
+- Added `AiSystem::thinking_level` and the `ThinkingLevel` enum (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). Leaving it unset sends no reasoning parameter, so the provider's default applies.
+- The level is sent as Anthropic adaptive thinking and effort (or a thinking budget on older models), OpenAI and xAI `reasoning.effort`, Gemini `thinkingConfig`, and LM Studio's `reasoning` field. A level the model does not offer is sent as the nearest lower one it does.
+- OpenAI and Gemini systems now stream their reasoning when the level is above `off`.
+- Added `AiSystemManager::thinkingLevels($provider, $model, $modelCapabilities)`, which lists the levels a provider and model can honor and whether the level controls effort or only whether reasoning is shown, for building a level selector.
+- Added `AiSystem::thinkingLevel()`, which falls back to `enable_thinking` when no level is stored or the column has not been migrated yet.
+
+### Bug Fixes
+- An Anthropic system with thinking enabled no longer fails on Claude Opus 4.7 and later, which reject a fixed thinking budget.
+
 ## [0.18.0] — 2026-10-13
 
 Tightens how an `AiSystem`'s `credentials`, `web_tool_policy` and `role` are validated and enforced.
