@@ -53,7 +53,8 @@ class CodeTalkerAgent implements Agent, HasProviderOptions, HasTools, RemembersC
     }
 
     /**
-     * Whether reasoning/"thinking" output should be surfaced to the caller.
+     * Whether reasoning/"thinking" output should be surfaced to the caller:
+     * true only when the system's thinking level is above `off`.
      *
      * Deliberately not part of providerOptions() — that array is merged
      * straight into the outgoing HTTP request body, and this is read

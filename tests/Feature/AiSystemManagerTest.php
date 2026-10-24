@@ -10,6 +10,7 @@ use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Enums\AiSystemRole;
+use Jvjvjv\CodeTalker\Enums\ThinkingLevel;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiSystemFeatureDefault;
@@ -792,5 +793,114 @@ class AiSystemManagerTest extends TestCase
         Http::preventStrayRequests();
 
         $this->assertSame([], $this->manager()->availableModels(AiProvider::ElevenLabs, 'xi-test'));
+    }
+
+    public function test_a_thinking_level_is_stored_and_mirrored_to_the_legacy_flag(): void
+    {
+        $system = $this->manager()->create($this->validAttributes(['thinking_level' => 'low']))->fresh();
+
+        $this->assertSame(ThinkingLevel::Low, $system->thinking_level);
+        $this->assertTrue($system->enable_thinking);
+
+        $off = $this->manager()->create($this->validAttributes(['thinking_level' => 'off']))->fresh();
+
+        $this->assertSame(ThinkingLevel::Off, $off->thinking_level);
+        $this->assertFalse($off->enable_thinking);
+    }
+
+    public function test_a_lone_legacy_flag_is_translated_to_a_level(): void
+    {
+        $on = $this->manager()->create($this->validAttributes(['enable_thinking' => true]))->fresh();
+        $off = $this->manager()->create($this->validAttributes(['enable_thinking' => '0']))->fresh();
+
+        $this->assertSame(ThinkingLevel::Medium, $on->thinking_level);
+        $this->assertSame(ThinkingLevel::Off, $off->thinking_level);
+        $this->assertFalse($off->enable_thinking);
+    }
+
+    public function test_a_submitted_level_wins_over_the_legacy_flag(): void
+    {
+        $system = $this->manager()->create($this->validAttributes([
+            'thinking_level' => 'high',
+            'enable_thinking' => false,
+        ]))->fresh();
+
+        $this->assertSame(ThinkingLevel::High, $system->thinking_level);
+        $this->assertTrue($system->enable_thinking);
+    }
+
+    public function test_an_update_that_omits_thinking_keeps_the_stored_level(): void
+    {
+        $system = $this->manager()->create($this->validAttributes(['thinking_level' => 'xhigh']));
+
+        $this->manager()->update($system, ['name' => 'Renamed', 'max_tokens' => 1024]);
+
+        $this->assertSame(ThinkingLevel::XHigh, $system->fresh()->thinking_level);
+        $this->assertTrue($system->fresh()->enable_thinking);
+    }
+
+    public function test_an_update_can_clear_the_level_back_to_the_provider_default(): void
+    {
+        $system = $this->manager()->create($this->validAttributes(['thinking_level' => 'high']));
+
+        $this->manager()->update($system, ['name' => 'Same', 'max_tokens' => 1024, 'thinking_level' => null]);
+
+        $this->assertNull($system->fresh()->thinking_level);
+        $this->assertNull($system->fresh()->enable_thinking);
+        $this->assertNull($system->fresh()->thinkingLevel());
+    }
+
+    public function test_an_unknown_thinking_level_is_rejected(): void
+    {
+        try {
+            $this->manager()->create($this->validAttributes(['thinking_level' => 'extreme']));
+            $this->fail('An unknown thinking level was accepted.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('thinking_level', $e->errors());
+        }
+
+        $this->assertSame(0, AiSystem::count());
+    }
+
+    public function test_thinking_levels_for_an_effort_model(): void
+    {
+        $this->assertSame(
+            ['levels' => ['off', 'low', 'medium', 'high', 'xhigh', 'max'], 'controls_effort' => true],
+            $this->manager()->thinkingLevels(AiProvider::Anthropic, 'claude-opus-4-8'),
+        );
+    }
+
+    public function test_thinking_levels_still_offer_off_for_a_model_that_cannot_stop_reasoning(): void
+    {
+        $levels = $this->manager()->thinkingLevels('anthropic', 'claude-opus-5-5');
+
+        $this->assertSame('off', $levels['levels'][0]);
+        $this->assertTrue($levels['controls_effort']);
+    }
+
+    public function test_thinking_levels_follow_the_model_variant(): void
+    {
+        $this->assertSame(['off', 'medium', 'high', 'xhigh'], $this->manager()->thinkingLevels('openai', 'gpt-5.2-pro')['levels']);
+        $this->assertSame(['off', 'low', 'medium', 'high'], $this->manager()->thinkingLevels('gemini', 'gemini-3.1-pro-preview')['levels']);
+    }
+
+    public function test_thinking_levels_for_a_visibility_only_provider(): void
+    {
+        $expected = ['levels' => ['off', 'medium'], 'controls_effort' => false];
+
+        $this->assertSame($expected, $this->manager()->thinkingLevels('openai-compatible', 'deepseek-r1'));
+        $this->assertSame($expected, $this->manager()->thinkingLevels('lm-studio', 'qwen3'));
+        $this->assertSame(
+            ['levels' => ['off', 'low', 'medium', 'high'], 'controls_effort' => true],
+            $this->manager()->thinkingLevels('lm-studio', 'qwen3', ['reasoning' => true]),
+        );
+    }
+
+    public function test_thinking_levels_for_a_voice_provider_are_empty(): void
+    {
+        $this->assertSame(
+            ['levels' => [], 'controls_effort' => false],
+            $this->manager()->thinkingLevels(AiProvider::ElevenLabs, 'eleven_multilingual_v2'),
+        );
     }
 }

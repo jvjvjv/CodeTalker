@@ -582,7 +582,8 @@ class AiPersonaConversationServiceTest extends TestCase
             $this->fakeAgentGateways[CodeTalkerAgent::class] = $stuckReasoning;
         }, $manager, $manager::class))();
 
-        $persona = $this->makePersona();
+        // Reasoning is kept only for a system whose thinking level is above off.
+        $persona = $this->makePersona(['thinking_level' => 'low']);
 
         // Trip the guard only after a few reasoning deltas have streamed, so
         // there is real partial content to preserve.

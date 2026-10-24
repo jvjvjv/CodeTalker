@@ -30,9 +30,10 @@ use Laravel\Ai\Streaming\Events\ToolCall as ToolCallEvent;
  * ReasoningDelta and their "thinking" no longer reaches the chat UI.
  *
  * This overrides processTextStream() to re-emit that reasoning, gated on the
- * requesting AiSystem's `enable_thinking` flag (via CodeTalkerAgent::showThinking(),
- * threaded through by the generateStreamStep() override below) so disabling the
- * flag actually stops reasoning blocks from reaching the chat UI. Both method
+ * requesting AiSystem's thinking level (via CodeTalkerAgent::showThinking(),
+ * threaded through by the generateStreamStep() override below) so a system at
+ * `off` never emits reasoning. StreamTranslator applies the same gate for every
+ * provider; this one also keeps it out of the step's own response. Both method
  * bodies are copied VERBATIM from laravel/ai v0.9.0
  * (Gateway\OpenAiCompatible\Concerns\HandlesTextStreaming::processTextStream and
  * Concerns\PerformsChatCompletionSteps::generateStreamStep) with a single added
