@@ -176,6 +176,50 @@ class RemoteMcpToolsTest extends TestCase
         $this->assertStringContainsString('budget', $tool->unrepresentable_reason);
     }
 
+    public function test_mutually_recursive_references_are_counted_per_path(): void
+    {
+        // Seven definitions that each reference all seven. The normalizer
+        // stops a cycle only on the path that closed it, so every ordering of
+        // the definitions is inlined: thousands of paths from 50 pointers.
+        $names = array_map(fn (int $i): string => "D{$i}", range(0, 6));
+        $defs = [];
+
+        foreach ($names as $name) {
+            $properties = ['label' => ['type' => 'string']];
+
+            foreach ($names as $other) {
+                $properties["to{$other}"] = ['$ref' => "#/\$defs/{$other}"];
+            }
+
+            $defs[$name] = ['type' => 'object', 'properties' => $properties];
+        }
+
+        $schema = ['type' => 'object', 'properties' => ['root' => ['$ref' => '#/$defs/D0']], '$defs' => $defs];
+
+        $started = microtime(true);
+        $reason = (string) RemoteToolSchema::unrepresentableReason($schema);
+
+        $this->assertLessThan(1.0, microtime(true) - $started);
+        $this->assertStringContainsString('expand', $reason);
+    }
+
+    public function test_a_small_recursive_schema_is_still_representable(): void
+    {
+        $schema = [
+            'type' => 'object',
+            'properties' => ['tree' => ['$ref' => '#/$defs/Node']],
+            '$defs' => ['Node' => [
+                'type' => 'object',
+                'properties' => [
+                    'name' => ['type' => 'string'],
+                    'children' => ['type' => 'array', 'items' => ['$ref' => '#/$defs/Node']],
+                ],
+            ]],
+        ];
+
+        $this->assertNull(RemoteToolSchema::unrepresentableReason($schema));
+    }
+
     public function test_the_schema_budget_refuses_size_reference_count_and_depth(): void
     {
         $big = ['type' => 'object', 'properties' => ['q' => ['type' => 'string', 'description' => str_repeat('x', RemoteToolSchema::MAX_BYTES)]]];

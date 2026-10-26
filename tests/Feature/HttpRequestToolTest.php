@@ -959,6 +959,18 @@ class HttpRequestToolTest extends TestCase
         $this->assertSame('https://host.test/plain', WebFetcher::redactUrl('https://host.test/plain'));
     }
 
+    public function testRedactUrlMasksVendorSpellingsOfCredentialParameters(): void
+    {
+        $this->assertSame(
+            'https://s3.test/o?X-Amz-Credential=***&X-Amz-Security-Token=***&X-Amz-Signature=***&X-Goog-Signature=***'
+                . '&client_secret=***&refresh_token=***&sig=***&code=***&password=***&session_id=***&page=2',
+            WebFetcher::redactUrl(
+                'https://s3.test/o?X-Amz-Credential=a&X-Amz-Security-Token=b&X-Amz-Signature=c&X-Goog-Signature=d'
+                . '&client_secret=e&refresh_token=f&sig=g&code=h&password=i&session_id=j&page=2',
+            ),
+        );
+    }
+
     // ------------------------------------------------------- unresolvable host
 
     public function testAnUnresolvableHostIsNotPinnedEvenWhenPrivateHostsArePermitted(): void

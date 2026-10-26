@@ -67,15 +67,26 @@ class WebFetcher
         'x-request-id',
     ];
 
-    /** Query parameters whose values {@see redactUrl()} masks. */
-    private const REDACTED_QUERY_PARAMETERS = [
+    /**
+     * {@see redactUrl()} masks a query parameter whose name contains one of
+     * these (so `x-amz-security-token`, `client_secret`, `X-Goog-Signature`),
+     * or is one of {@see REDACTED_QUERY_NAMES}. Matching by fragment over-masks
+     * the odd harmless name in a log line, which costs nothing; an exact list
+     * misses every vendor's own spelling.
+     */
+    private const REDACTED_QUERY_FRAGMENTS = [
         'key',
-        'api_key',
-        'apikey',
         'token',
-        'access_token',
+        'secret',
         'signature',
+        'credential',
+        'password',
+        'passwd',
+        'session',
     ];
+
+    /** Names too short to match as fragments without masking everything. */
+    private const REDACTED_QUERY_NAMES = ['sig', 'code', 'auth', 'pwd'];
 
     /**
      * Request headers a caller may never set, regardless of policy.
@@ -144,11 +155,28 @@ class WebFetcher
 
         return preg_replace_callback(
             '/([?&])([^=&#\s]+)=([^&#\s]*)/',
-            static fn (array $match): string => in_array(strtolower(rawurldecode($match[2])), self::REDACTED_QUERY_PARAMETERS, true)
+            static fn (array $match): string => self::isSensitiveParameter($match[2])
                 ? $match[1] . $match[2] . '=***'
                 : $match[0],
             $text,
         ) ?? $text;
+    }
+
+    private static function isSensitiveParameter(string $name): bool
+    {
+        $name = strtolower(rawurldecode($name));
+
+        if (in_array($name, self::REDACTED_QUERY_NAMES, true)) {
+            return true;
+        }
+
+        foreach (self::REDACTED_QUERY_FRAGMENTS as $fragment) {
+            if (str_contains($name, $fragment)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

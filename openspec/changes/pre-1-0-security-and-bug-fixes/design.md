@@ -33,7 +33,7 @@ See proposal.md — Why. The constraints that shape the fixes:
 
 ### D2. Secrets never in URLs; redaction before logging
 
-`ProviderModelsClient::geminiModels()` sends `x-goog-api-key` (the header laravel/ai's own gateway uses). `WebFetcher` gets one `redactUrl()` helper (strip userinfo; replace values of `key`, `api_key`, `apikey`, `token`, `access_token`, `signature` with `***`) applied to every log line and every error string that echoes a URL. `RawExchangeRecorder` logs `get_class($e)` and `$e->getCode()` only — `QueryException::getMessage()` interpolates bindings.
+`ProviderModelsClient::geminiModels()` sends `x-goog-api-key` (the header laravel/ai's own gateway uses). `WebFetcher` gets one `redactUrl()` helper (strip userinfo; mask the value of any query parameter whose name contains `key`, `token`, `secret`, `signature`, `credential`, `password`, `passwd`, or `session`, or is `sig`, `code`, `auth`, or `pwd` — fragments rather than a fixed list, so vendor spellings such as `X-Amz-Signature` are covered) applied to every log line and every error string that echoes a URL. `RawExchangeRecorder` logs `get_class($e)` and `$e->getCode()` only — `QueryException::getMessage()` interpolates bindings.
 
 ### D3. `uuid` migration with backfill
 
@@ -86,7 +86,7 @@ Pass a `CappedBodySink` (a PHP stream wrapper) as Guzzle's `sink`. It receives d
 - Whole write inside the existing try/catch; `DB::transaction` failure records `last_sync_error` like a transport failure.
 - Inside the transaction: compute `$seenRemote` first, `delete()` rows not in it, null the exposed names kept rows are giving up (so two kept rows can trade names), *then* upsert — so a reassigned exposed name never collides. Track previous owner per exposed name; if the owner `remote_name` changed, dispatch `RemoteMcpToolDefinitionChanged` for the new row.
 - `BoundedToolListing` (extends laravel/mcp's `ListTools`) with `remote_mcp.max_tools` (default 500) as both the tool and page bound; exceeding either ⇒ `last_sync_error`, catalog untouched. It reaches the client's protected `protocol` through a bound closure, since `Client::tools()` cannot bound pages.
-- `RemoteToolSchema::assertWithinBudget()` before `SchemaNormalizer`: refuse if `strlen(json) > 64 KB`, `$ref` count > 100, `json_decode` depth > 32, or more than 20 000 nodes once `$ref`s are expanded (memoized) — the last catches a small fan-out schema the first three miss; reason stored. Cache converted properties on `RemoteToolHandler` so `toLaravelAiTools()` and `schema()` convert once.
+- `RemoteToolSchema::assertWithinBudget()` before `SchemaNormalizer`: refuse if `strlen(json) > 64 KB`, `$ref` count > 100, `json_decode` depth > 32, or more than 20 000 nodes once `$ref`s are expanded — the last catches a small fan-out schema the first three miss. The count follows the normalizer's per-path cycle guard and memoizes a reference only when its expansion met no cycle, since a size cut short by a cycle depends on the path; reason stored. Cache converted properties on `RemoteToolHandler` so `toLaravelAiTools()` and `schema()` convert once.
 - `title`/`remote_name` truncated to 255 (title) / rejected as unrepresentable (remote name) before write.
 - `RemoteToolHandler::toArray()` caps text and JSON-encoded structured content at `remote_mcp.max_result_bytes` (default 100 000) with a truncation note; `structuredContent === []` treated as absent.
 - `RemoteServerSession`: a `JsonRpcException` thrown before `connected()` trips the breaker.

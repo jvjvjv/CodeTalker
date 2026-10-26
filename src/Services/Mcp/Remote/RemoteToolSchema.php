@@ -99,55 +99,71 @@ final class RemoteToolSchema
 
         $memo = [];
 
-        if (self::expandedSize($inputSchema, $inputSchema, $memo, []) > self::MAX_EXPANDED_NODES) {
+        if (self::expandedSize($inputSchema, $inputSchema, $memo, [])[0] > self::MAX_EXPANDED_NODES) {
             throw new RuntimeException('Input schema exceeds the budget: its $ref pointers expand to more than ' . self::MAX_EXPANDED_NODES . ' nodes.');
         }
     }
 
     /**
      * Count the nodes a schema expands to with each local `$ref` inlined, as
-     * SchemaNormalizer would. A reference's size is memoized, so this costs
-     * the schema's own size however far it would expand; a reference already
-     * being expanded counts once, matching the normalizer's cycle guard.
-     * The count stops growing usefully past the cap, so it is clamped there.
+     * SchemaNormalizer would: a reference already being expanded on the
+     * current path counts once, matching the normalizer's per-path cycle
+     * guard. A reference's size is memoized only when its expansion never
+     * met that guard, because only then is the size the same on every path;
+     * a size cut short by a cycle depends on which references were above it.
+     * Every node visited adds to the total, and counting stops once the total
+     * passes the cap, so the work is bounded by the cap however the
+     * references fan out.
      *
      * @param array<mixed> $node
      * @param array<string, mixed> $root
      * @param array<string, int> $memo
      * @param array<string, true> $expanding
+     * @return array{0: int, 1: bool} the size, and whether a cycle cut it short
      */
-    private static function expandedSize(array $node, array $root, array &$memo, array $expanding): int
+    private static function expandedSize(array $node, array $root, array &$memo, array $expanding): array
     {
         $size = 1;
+        $cut = false;
 
         foreach ($node as $key => $value) {
             if ($key === '$ref' && is_string($value)) {
-                $size += self::refSize($value, $root, $memo, $expanding);
+                [$childSize, $childCut] = self::refSize($value, $root, $memo, $expanding);
             } elseif (is_array($value)) {
-                $size += self::expandedSize($value, $root, $memo, $expanding);
+                [$childSize, $childCut] = self::expandedSize($value, $root, $memo, $expanding);
+            } else {
+                continue;
             }
 
+            $size += $childSize;
+            $cut = $cut || $childCut;
+
             if ($size > self::MAX_EXPANDED_NODES) {
-                return self::MAX_EXPANDED_NODES + 1;
+                return [self::MAX_EXPANDED_NODES + 1, $cut];
             }
         }
 
-        return $size;
+        return [$size, $cut];
     }
 
     /**
      * @param array<string, mixed> $root
      * @param array<string, int> $memo
      * @param array<string, true> $expanding
+     * @return array{0: int, 1: bool}
      */
-    private static function refSize(string $ref, array $root, array &$memo, array $expanding): int
+    private static function refSize(string $ref, array $root, array &$memo, array $expanding): array
     {
         if (isset($memo[$ref])) {
-            return $memo[$ref];
+            return [$memo[$ref], false];
         }
 
-        if (isset($expanding[$ref]) || !str_starts_with($ref, '#/')) {
-            return 1;
+        if (isset($expanding[$ref])) {
+            return [1, true];
+        }
+
+        if (!str_starts_with($ref, '#/')) {
+            return [1, false];
         }
 
         $target = $root;
@@ -156,18 +172,24 @@ final class RemoteToolSchema
             $segment = str_replace(['~1', '~0'], ['/', '~'], rawurldecode($segment));
 
             if (!is_array($target) || !array_key_exists($segment, $target)) {
-                return 1;
+                return [1, false];
             }
 
             $target = $target[$segment];
         }
 
         if (!is_array($target)) {
-            return 1;
+            return [1, false];
         }
 
         $expanding[$ref] = true;
 
-        return $memo[$ref] = self::expandedSize($target, $root, $memo, $expanding);
+        [$size, $cut] = self::expandedSize($target, $root, $memo, $expanding);
+
+        if (!$cut) {
+            $memo[$ref] = $size;
+        }
+
+        return [$size, $cut];
     }
 }
