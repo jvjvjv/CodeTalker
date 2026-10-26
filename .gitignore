@@ -22,3 +22,6 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+# Tracked here even though the global gitignore excludes it.
+!/AGENTS.md
