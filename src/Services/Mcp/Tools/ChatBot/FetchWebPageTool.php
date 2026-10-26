@@ -78,6 +78,7 @@ class FetchWebPageTool extends Tool
             keepHtml: (bool) $request->get('keep_html', false),
             targetSelector: trim((string) $request->get('target_selector', '')),
             truncate: (bool) $request->get('truncate_content', true),
+            fromExternalCaller: $this->context->conversation === null,
         );
 
         if ($fetched->failed()) {

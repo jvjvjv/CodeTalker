@@ -5,7 +5,6 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiSystem;
@@ -19,17 +18,6 @@ class ThinkingVisibilityTurnTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        if (! Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     /**

@@ -142,7 +142,9 @@ class AiMcpServerManager
 
     /**
      * An omitted `auth` keeps the stored credentials, so an edit form never
-     * has to round-trip a secret it should not be displaying.
+     * has to round-trip a secret it should not be displaying. So does one that
+     * arrives null, `''`, or JSON `null` — what a blank secret field submits.
+     * To drop credentials, send `{"type": "none"}`.
      *
      * @param array<string, mixed> $data
      * @return array{server: AiMcpServer, sync: array{server: string, stored: int, unrepresentable: int, error: ?string}}
@@ -150,6 +152,12 @@ class AiMcpServerManager
     public function update(AiMcpServer $server, array $data): array
     {
         unset($data['slug']);
+
+        // Before validation, not after decodeAuth(): a JSON `null` would fail
+        // the auth rule as "not an object" rather than mean "unchanged".
+        if (array_key_exists('auth', $data) && $this->isBlankAuth($data['auth'])) {
+            unset($data['auth']);
+        }
 
         $data = Validator::make($data, static::updateRules($data))->validate();
         $this->decodeAuth($data);
@@ -239,6 +247,15 @@ class AiMcpServerManager
                 ])->all(),
             ])
             ->all();
+    }
+
+    private function isBlankAuth(mixed $auth): bool
+    {
+        if ($auth === null || $auth === '') {
+            return true;
+        }
+
+        return is_string($auth) && json_validate($auth) && json_decode($auth) === null;
     }
 
     /**

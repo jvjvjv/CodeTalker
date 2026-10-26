@@ -3,7 +3,10 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Models\AiProviderExchange;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeContext;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeFrame;
@@ -132,5 +135,30 @@ class RawExchangeRecorderTest extends TestCase
         $exchange = AiProviderExchange::first();
         $this->assertNotNull($exchange);
         $this->assertSame('anthropic', $exchange->provider);
+    }
+
+    public function test_a_failed_insert_logs_the_exception_class_and_code_but_not_the_bodies(): void
+    {
+        $this->pushFrame();
+        Schema::drop('ai_provider_exchanges');
+        Http::fake(['http://localhost:1234/v1/chat/completions' => Http::response('{"reply":"response-secret"}', 200)]);
+
+        $logged = [];
+        Log::listen(function ($event) use (&$logged): void {
+            $logged[] = ['message' => $event->message, 'context' => $event->context];
+        });
+
+        $response = Http::post('http://localhost:1234/v1/chat/completions', ['prompt' => 'request-secret']);
+
+        $this->assertSame('response-secret', $response->json('reply'));
+
+        $warning = collect($logged)->firstWhere('message', 'Failed to record provider exchange');
+        $this->assertNotNull($warning);
+        $this->assertSame(QueryException::class, $warning['context']['exception']);
+        $this->assertArrayHasKey('code', $warning['context']);
+
+        $serialized = json_encode($logged);
+        $this->assertStringNotContainsString('request-secret', $serialized);
+        $this->assertStringNotContainsString('response-secret', $serialized);
     }
 }

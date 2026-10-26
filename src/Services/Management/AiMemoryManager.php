@@ -19,12 +19,18 @@ class AiMemoryManager
     }
 
     /**
+     * A memory belongs to exactly one identity — a user or a visitor, never
+     * both and never neither. An unscoped memory would be injected for no one,
+     * and a dual-scoped one would be read by a visitor typing the user's email.
+     *
      * @return array<string, mixed>
      */
     public static function createRules(): array
     {
         return array_merge([
             'feature' => ['required', 'string', 'max:50'],
+            'user_id' => ['nullable', 'required_without:visitor_email', 'prohibits:visitor_email', 'max:191'],
+            'visitor_email' => ['nullable', 'required_without:user_id', 'prohibits:user_id', 'string', 'email', 'max:255'],
         ], static::sharedRules());
     }
 

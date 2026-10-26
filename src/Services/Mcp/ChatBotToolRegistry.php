@@ -12,7 +12,6 @@ use Jvjvjv\CodeTalker\Services\LaravelAi\BridgedTool;
 use Jvjvjv\CodeTalker\Services\LaravelAi\RemoteBridgedTool;
 use Jvjvjv\CodeTalker\Services\Mcp\Remote\RemoteToolCatalog;
 use Jvjvjv\CodeTalker\Services\Mcp\Remote\RemoteToolHandler;
-use Jvjvjv\CodeTalker\Services\Mcp\Remote\RemoteToolSchema;
 use Jvjvjv\CodeTalker\Support\ToolContext;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Server\Tool;
@@ -165,13 +164,15 @@ class ChatBotToolRegistry implements AiToolRegistryContract
         $tools = [];
 
         foreach ($this->toApiTools() as $tool) {
-            if (!$this->handlers[$tool['name']] instanceof RemoteToolHandler) {
+            $handler = $this->handlers[$tool['name']];
+
+            if (!$handler instanceof RemoteToolHandler) {
                 $tools[] = new BridgedTool($tool['name'], $tool['description'], (array) $tool['input_schema'], $this);
 
                 continue;
             }
 
-            $reason = RemoteToolSchema::unrepresentableReason((array) $tool['input_schema']);
+            $reason = $handler->unrepresentableReason();
 
             if ($reason !== null) {
                 Log::warning('code-talker: remote MCP tool withheld from this turn', [
@@ -182,7 +183,7 @@ class ChatBotToolRegistry implements AiToolRegistryContract
                 continue;
             }
 
-            $tools[] = new RemoteBridgedTool($tool['name'], $tool['description'], (array) $tool['input_schema'], $this);
+            $tools[] = new RemoteBridgedTool($tool['name'], $tool['description'], $handler, $this);
         }
 
         return $tools;

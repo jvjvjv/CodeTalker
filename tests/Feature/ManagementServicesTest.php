@@ -30,14 +30,6 @@ class ManagementServicesTest extends TestCase
     {
         parent::setUp();
 
-        // AiConversation::booted() assigns a uuid, but no package migration
-        // creates the column (host apps add it themselves).
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
-
         // Testbench's migrations do not create a `users` table, and conversation
         // search joins one to match on the participant's name and email.
         if (!Schema::hasTable('users')) {

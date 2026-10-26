@@ -7,6 +7,7 @@ use Laravel\Mcp\Client;
 use Laravel\Mcp\Client\Exceptions\AuthorizationRequiredException;
 use Laravel\Mcp\Client\Schema\ToolResult;
 use Laravel\Mcp\Exceptions\JsonRpcException;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -16,7 +17,9 @@ use Throwable;
  * Nothing touches the network until the first call. After a transport or
  * protocol failure the session trips, and every later call fails at once:
  * without that, a dead server costs a full timeout on each of the agent
- * loop's steps. A JSON-RPC error is the server answering, so it never trips.
+ * loop's steps. A JSON-RPC error to a tool call is the server answering, so
+ * it never trips; one to the `initialize` handshake means no tool on the
+ * server can be called, so it trips like a transport failure.
  */
 class RemoteServerSession
 {
@@ -45,7 +48,7 @@ class RemoteServerSession
      *
      * @throws RemoteServerUnavailable when the breaker has tripped
      * @throws JsonRpcException when the server rejects the call
-     * @throws Throwable on any transport or protocol failure (which trips the breaker)
+     * @throws Throwable on any transport or protocol failure, or a rejected handshake (which trip the breaker)
      */
     public function call(string $remoteName, array $arguments): ToolResult
     {
@@ -70,14 +73,14 @@ class RemoteServerSession
             try {
                 return $this->attempt($remoteName, $arguments);
             } catch (JsonRpcException $retryError) {
-                throw $retryError;
+                throw $this->handshakeFailure($retryError) ?? $retryError;
             } catch (Throwable $retryError) {
                 $this->trip($retryError);
 
                 throw $retryError;
             }
         } catch (JsonRpcException $e) {
-            throw $e;
+            throw $this->handshakeFailure($e) ?? $e;
         } catch (Throwable $e) {
             $this->trip($e);
 
@@ -109,6 +112,23 @@ class RemoteServerSession
         $this->client ??= $this->factory->make($this->server);
 
         return $this->client->callTool($remoteName, $arguments);
+    }
+
+    /**
+     * A JSON-RPC error raised while the client is not connected came from the
+     * handshake (laravel/mcp disconnects when `initialize` fails), not from
+     * the tool. Trip, and report it as a server failure rather than as the
+     * tool rejecting the model's arguments.
+     */
+    private function handshakeFailure(JsonRpcException $e): ?RuntimeException
+    {
+        if ($this->client?->connected()) {
+            return null;
+        }
+
+        $this->trip($e);
+
+        return new RuntimeException('MCP session handshake rejected: ' . $e->getMessage(), 0, $e);
     }
 
     private function trip(Throwable $cause): void

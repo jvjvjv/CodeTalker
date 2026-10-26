@@ -3,13 +3,13 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiOperator;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\Management\AiOperatorManager;
 use Jvjvjv\CodeTalker\Tests\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 
 class AiOperatorManagerTest extends TestCase
 {
@@ -20,18 +20,7 @@ class AiOperatorManagerTest extends TestCase
         $this->loadLaravelMigrations();
     }
 
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
-    }
-
-    private function makeSystem(array $overrides = []): AiSystem
+    public function makeSystem(array $overrides = []): AiSystem
     {
         return AiSystem::create(array_merge([
             'name' => 'Test System',
@@ -137,5 +126,46 @@ class AiOperatorManagerTest extends TestCase
 
         $this->assertSame(1, $listed[0]['runs_count']);
         $this->assertSame(0.05, $listed[0]['usage']['cost_usd']);
+    }
+
+    /**
+     * @return array<string, array{\Closure(AiOperatorManagerTest): AiSystem}>
+     */
+    public static function unusableSystems(): array
+    {
+        return [
+            'soft-deleted' => [static function (self $test): AiSystem {
+                $system = $test->makeSystem();
+                $system->delete();
+
+                return $system;
+            }],
+            'inactive' => [static fn (self $test): AiSystem => $test->makeSystem(['is_active' => false])],
+            'audio role' => [static fn (self $test): AiSystem => $test->makeSystem([
+                'provider' => 'openai',
+                'role' => 'audio',
+                'model' => '',
+            ])],
+        ];
+    }
+
+    #[DataProvider('unusableSystems')]
+    public function test_an_operator_on_an_unusable_system_is_rejected(\Closure $makeSystem): void
+    {
+        $system = $makeSystem($this);
+
+        try {
+            $this->manager()->create([
+                'ai_system_id' => $system->id,
+                'name' => 'Order Processor',
+                'slug' => 'order-processor',
+                'prompt_template' => 'Process it.',
+            ]);
+            $this->fail('An unusable system should have been rejected.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('ai_system_id', $e->errors());
+        }
+
+        $this->assertSame(0, AiOperator::count());
     }
 }

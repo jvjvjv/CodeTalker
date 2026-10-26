@@ -8,6 +8,7 @@ use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\SearchWeb\EngineResults;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\SearchWeb\SearchEngineRegistry;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\SearchWeb\SearchQuery;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\SearchWeb\SearchResultsMarkdown;
+use Jvjvjv\CodeTalker\Services\Web\WebFetcher;
 use Jvjvjv\CodeTalker\Support\ToolContext;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -129,6 +130,10 @@ class SearchWebTool extends Tool
 
     /**
      * One engine failing must not lose the results from the others.
+     *
+     * The model is told only that the engine failed. A transport message
+     * quotes the request URL, which for an API-backed engine carries its key,
+     * so the detail is logged — with credential parameters masked — instead.
      */
     private function searchEngine(SearchEngineRegistry $registry, string $engine, SearchQuery $query): EngineResults
     {
@@ -138,10 +143,11 @@ class SearchWebTool extends Tool
             Log::warning('search-web engine search failed', [
                 'engine' => $engine,
                 'query' => $query->term,
-                'error' => $e->getMessage(),
+                'exception' => $e::class,
+                'error' => WebFetcher::redactText($e->getMessage()),
             ]);
 
-            return EngineResults::threw($engine, $e->getMessage());
+            return EngineResults::threw($engine, 'transport failure');
         }
     }
 

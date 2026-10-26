@@ -2,7 +2,10 @@
 
 namespace Jvjvjv\CodeTalker\Services;
 
+use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\RequestException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 
@@ -33,6 +36,27 @@ class ProviderModelsClient
      * @return array<int, array{id: string, display_name: string}>
      */
     public function listModels(AiProvider $provider, ?string $apiKey = null, ?string $baseUrl = null): array
+    {
+        try {
+            return $this->fetchModels($provider, $apiKey, $baseUrl);
+        } catch (ConnectionException|RequestException $e) {
+            // Both carry the request URL, and a 4xx body can echo the key
+            // back. The caller gets a fixed message; the detail is logged.
+            Log::warning('Listing provider models failed', [
+                'provider' => $provider->value,
+                'exception' => $e,
+            ]);
+
+            $status = $e instanceof RequestException ? " (HTTP {$e->response->status()})" : '';
+
+            throw new \RuntimeException("Could not list models for the '{$provider->value}' provider{$status}.");
+        }
+    }
+
+    /**
+     * @return array<int, array{id: string, display_name: string}>
+     */
+    private function fetchModels(AiProvider $provider, ?string $apiKey, ?string $baseUrl): array
     {
         return match ($provider) {
             AiProvider::Anthropic => $this->anthropicModels($apiKey, $baseUrl),
@@ -100,8 +124,11 @@ class ProviderModelsClient
      */
     private function geminiModels(?string $apiKey, ?string $baseUrl): array
     {
-        $response = Http::timeout(15)
-            ->get($this->resolveBaseUrl(AiProvider::Gemini, $baseUrl) . '/models', ['key' => (string) $apiKey]);
+        // Header, not the `key` query parameter: a URL is echoed by transport
+        // errors and logs, a header is not.
+        $response = Http::withHeaders(['x-goog-api-key' => (string) $apiKey])
+            ->timeout(15)
+            ->get($this->resolveBaseUrl(AiProvider::Gemini, $baseUrl) . '/models');
 
         $response->throw();
 

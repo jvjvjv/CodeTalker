@@ -199,9 +199,10 @@ accordingly.
 
 ### Troubleshooting
 
-**`Provider is unavailable: HTTP request returned status code 404`** — returned
-by the model-status / readiness check (and cloud-provider chat also 404s) for
-`anthropic`, `openai`, `gemini`, or `grok`.
+**`Provider is unavailable.` with a 404 in the log** — the model-status /
+readiness check reports only that fixed message; the cause is logged under
+`AI system readiness check failed`. A 404 there (cloud-provider chat also 404s)
+for `anthropic`, `openai`, `gemini`, or `grok`:
 
 - **Cause:** the provider base URL is missing its version segment — e.g.
   `https://api.anthropic.com` instead of `https://api.anthropic.com/v1`. This is
@@ -574,7 +575,15 @@ Every event carries a `type`. These are typed in the published declarations.
 | `heartbeat`             | — (encoded as an SSE comment, not a data frame)              |
 | `tool_use_progress`     | `text` (always `""`), `tools` (one tool name per event), plus `input`/`output`/`successful` when tool payloads are enabled |
 | `page_reload`           | —                                                             |
-| `error`                 | `message`, `reason` (`max_stream_duration`/`provider_error`) |
+| `error`                 | `message`, `reason` (`max_stream_duration`/`provider_error`/`persona_unavailable`/`system_unavailable`) |
+
+`error.message` is fixed text chosen by `reason`, never the provider's or the
+transport's own error text, which can name internal hosts or echo a request.
+The detail goes to the application log, `AiInteractionLog.error_message`, and,
+for a turn run as a job, `AiTurnRun.error_message`. A conversation whose
+persona was deactivated or whose system was deleted ends its turn with
+`persona_unavailable` or `system_unavailable` before any provider call. Like
+every `error`, neither is followed by `[DONE]`.
 
 `tool_use_progress` fires once per tool call the model makes mid-turn — the raw
 provider `ToolCall`/`ToolResult` events are never forwarded (their payloads
@@ -925,7 +934,11 @@ this tool is GET-only:
 
 **Omitting it fetches public hosts only.** Reaching a loopback, link-local, or
 private-network address requires declaring `allow_private_hosts`. The declaration is
-optional; the permission is not.
+optional; the permission is not. A host name that does not resolve is refused.
+
+Both web tools refuse a URL carrying credentials (`user:pass@host`), and both refuse
+`allow_private_hosts: true` when called through the [External MCP Server](#external-mcp-server),
+where there is no conversation: private hosts are reachable only from a chat turn.
 
 Redirects are re-validated hop by hop against the same policy, capped at five, and the
 response `url` reports the final destination.
@@ -957,11 +970,16 @@ string; HTML and other `text/*` types come back as text; anything else (images, 
 A response too large to return whole is truncated and flagged, and an oversized
 structure is downgraded to truncated text rather than returned as broken JSON.
 
+A non-2xx response is still an error, but it carries `status`, `content_type`, and the
+decoded `content` too, since an API's error body is usually what explains the failure.
+A header line that is not a valid `Name: value` pair is dropped and listed in
+`stripped_headers`; the request goes out without it.
+
 Both tools share the same two caps, configurable via `.env`:
 
 | Env var | Default | Applies to |
 | --- | --- | --- |
-| `CODE_TALKER_MAX_BODY_LENGTH` | `150000` bytes | Raw response body, cut immediately after fetch regardless of `truncate_content`. |
+| `CODE_TALKER_MAX_BODY_LENGTH` | `150000` bytes | Raw response body, regardless of `truncate_content`. Enforced while downloading and measured after decompression, so the transfer stops at the cap. |
 | `CODE_TALKER_MAX_CONTENT_LENGTH` | `20000` characters | Decoded/processed content, applied unless a call declines truncation via `truncate_content: false`. |
 
 **The model must declare a request policy, and the tool fails closed without one.**
@@ -986,7 +1004,8 @@ permit `file://`.
 **Redirects are not followed blindly.** Both tools disable automatic redirects and
 re-run the full policy check against every hop, capped at five, re-deriving credentials
 from each hop's own host. Each request also connects to the address that was checked,
-rather than resolving the host a second time.
+rather than resolving the host a second time. A 301, 302, or 303 that turns the request
+into a `GET` is followed even when `allowed_methods` does not list `GET`.
 
 > **A declared policy is a guardrail, not a boundary.** It records intent in the
 > `AiLlmMessage` log and keeps requests from reaching internal services by accident, but
@@ -995,9 +1014,12 @@ rather than resolving the host a second time.
 > the PHP process rather than relying on the tool to police itself.
 
 **The model does not supply credentials by default.** `Authorization`, `Cookie`,
-`Proxy-Authorization`, `Host`, and the hop-by-hop headers are stripped from
-model-supplied headers and reported back in the response, so the model learns why its
-auth attempt did nothing. The package attaches credentials from config instead,
+`Proxy-Authorization`, the API-key headers (`X-Api-Key`, `Api-Key`, `X-Auth-Token`,
+`X-Access-Token`, `X-Session-Token`, `X-Goog-Api-Key`, `X-Amz-Security-Token`), `Host`,
+and the hop-by-hop headers are stripped from model-supplied headers and reported back
+in the response, so the model learns why its auth attempt did nothing. On a redirect
+to a different host, only `Accept`, `Accept-Language`, `Content-Type`, `If-None-Match`,
+`If-Modified-Since`, `Range`, and `X-Request-Id` travel with it. The package attaches credentials from config instead,
 matched on exact host:
 
 ```php
@@ -1013,7 +1035,8 @@ matched on exact host:
 
 Credentials are applied after filtering, so a configured credential can set a header
 the model is forbidden to set. The value never appears in the tool's inputs or its
-response.
+response. Configured credentials are sent only over `https` or to a loopback address;
+a plain `http://` request to any other host goes out without them.
 
 **Per-`AiSystem` scoping.** The config above is global — every system with these tools
 in `allowed_tools` shares it. To restrict a specific system to only its own domain(s),
@@ -1137,8 +1160,10 @@ Only the tools you name are offered. A tool that appears on the server in a
 later sync is not granted until you add it. The double underscore marks a
 remote tool; if a local tool has the same name, the local tool wins.
 
-**Auth** is stored encrypted and never included in `list()`. The supported
-shapes are:
+**Auth** is stored encrypted and never included in `list()`. An `update()`
+whose `auth` is null, `''`, or JSON `null` keeps the stored auth, so an edit
+form that cannot show the secret does not wipe it; send `{"type": "none"}` to
+clear it. The supported shapes are:
 
 | `type`               | Fields                                                    |
 | -------------------- | --------------------------------------------------------- |
@@ -1165,6 +1190,21 @@ server.
   turn tries again.
 - A tool whose input schema can't be converted into a tool definition is
   stored but never offered. `list()` shows it as unavailable, with the reason.
+  So is a schema too large to convert safely: over 64 KB, more than 100
+  `$ref`s, nested deeper than 32, or more than 20,000 nodes once its references
+  are expanded.
+- A server that lists more than `remote_mcp.max_tools` tools (default `500`,
+  env `CODE_TALKER_REMOTE_MCP_MAX_TOOLS`), or more pages of tools than that,
+  fails its sync with a recorded error. Its previous catalog stays in place.
+- A tool result larger than `remote_mcp.max_result_bytes` (default `100000`,
+  env `CODE_TALKER_REMOTE_MCP_MAX_RESULT_BYTES`) is cut to that size before the
+  model sees it, and returned as `{content, truncated: true, note}`.
+- The timeout (`remote_mcp.max_timeout_seconds`, or a server's
+  `timeout_seconds`) bounds **each HTTP request**, not the whole call. A call
+  on a cold session makes several: the `initialize` handshake, the
+  `initialized` notification, then `tools/call`, plus a token request for
+  `client_credentials` and one retry after a 401. A slow server can hold a turn
+  for several multiples of the timeout before later calls fail fast.
 - While a remote call is in progress, the turn is waiting on it, so no
   heartbeat is sent. Keep `remote_mcp.max_timeout_seconds` low if you serve
   turns over a synchronous stream; [detached turns](#detached-turns) are
@@ -1208,7 +1248,9 @@ external MCP clients (Claude Desktop, Grok, etc.) through a bundled
   authenticated user is mapped to a `ToolContext` so user-scoped tools such as
   `scan-memories` resolve the correct identity. Since there is no conversation in
   this context, `scan-memories` searches across all of the user's memories rather
-  than a single feature.
+  than a single feature. When `mcp.web.middleware` is missing or `null` (a
+  published config that predates the key), the route gets `auth:sanctum`; only
+  an explicit `[]` removes it.
 - `scan-memories` implements `shouldRegister()` and is therefore only advertised
   to callers that have a user identity — anonymous callers never see it. If you
   expose the server on a public route, give it _optional_ authentication
@@ -1254,10 +1296,25 @@ extraction would cost O(N²) tokens in conversation length. If you disable the
 package scheduler (`'schedule' => false`), register the command yourself or
 memory extraction will never run.
 
-Memories are stored in `AiFeatureMemory` and scoped per user:
+Memories are stored in `AiFeatureMemory`, and each belongs to exactly one
+identity:
 
-- Authenticated users: scoped by `user_id`
-- Anonymous visitors: scoped by `visitor_email` (requires `require_visitor_identity = true`)
+- Authenticated users: scoped by `user_id`. When a conversation has a user, the
+  user wins; a memory written for them never also carries a visitor email.
+- Anonymous visitors: scoped by `visitor_email` (requires `require_visitor_identity = true`).
+  A visitor email never matches a memory that belongs to a user.
+
+A conversation with neither identity, and every operator run, is not analysed
+at all — there is no one to scope the result to.
+
+**A visitor email is unverified.** It is whatever the visitor typed, so anyone
+who enters an address can read and change the memories stored for it, through
+the system prompt and the `scan-memories` tool. Visitor-scoped memories are only
+as trustworthy as your identity collection; where their contents should stay
+private, require authentication rather than a typed email.
+
+`AiMemoryManager::create()` requires exactly one of `user_id` or
+`visitor_email`.
 
 ### Memory categories
 
@@ -1319,7 +1376,7 @@ Operations that have a side effect beyond the record report it, so you can build
 an accurate confirmation message:
 
 ```php
-$deactivatedBots = $systems->delete($system);       // bots are deactivated, not deleted
+$deactivatedBots = $systems->delete($system);       // personas and operators are deactivated, not deleted
 $orphanedSystems = $prompts->delete($prompt);       // systems have their prompt cleared
 $affectedSystems = $mcpServers->delete($server);    // systems that had granted one of its tools
 ```
@@ -1338,15 +1395,24 @@ $affectedSystems = $mcpServers->delete($server);    // systems that had granted 
   `web_tool_policy` are left out of `toArray()`/`toJson()`. Read them as
   attributes when an admin screen needs one. To include one in a payload, opt in
   on that instance: `$system->makeVisible('web_tool_policy')`.
-- **A blank secret on update means "unchanged".** Because `credentials` and
-  `web_tool_policy` cannot be prefilled from a serialized system, `update()` keeps
-  the stored value when either is omitted, `null`, or an empty string. To clear
-  one, send an empty object (`'{}'`). Clearing `web_tool_policy` leaves the system
-  unrestricted.
-- **Both must be JSON objects.** A number, string, boolean or list is rejected for
-  `credentials` and `web_tool_policy`, and `web_tool_policy` accepts only the keys
-  `allowed_domains` and `credentials`, so a misspelt key is an error rather than a
+- **A blank secret on update means "unchanged".** Because `api_key`,
+  `credentials` and `web_tool_policy` cannot be prefilled from a serialized
+  system, `update()` keeps the stored value when one is omitted, `null`, or an
+  empty string. Rotate a key by sending the new `api_key`. To clear `credentials`
+  or `web_tool_policy`, send an empty object (`'{}'`); clearing
+  `web_tool_policy` leaves the system unrestricted. An API key cannot be cleared
+  through `update()`.
+- **JSON fields must be objects.** A number, string, boolean or list is rejected
+  for `config`, `credentials`, `pricing_profile` and `web_tool_policy`, and for
+  `config.provider_options` when present. `web_tool_policy` accepts only the
+  keys `allowed_domains` and `credentials`, so a misspelt key is an error rather than a
   policy that restricts nothing.
+- **Other constraints.** `openai-compatible` systems need a `base_url` when
+  created. `temperature` accepts 0 to 2, on systems and personas. A persona's or
+  operator's `ai_system_id` must name an active, non-deleted chat system.
+- **Deleting a system** deactivates its personas and operators and releases the
+  features it was default for, in one transaction. It returns the number of
+  personas deactivated.
 - **`role` must suit the provider.** `createRules()` and `updateRules($system)`
   reject a pair the provider cannot serve. `AiSystemManager::providersFor($role)`
   lists the providers that can, for a provider chooser that follows the role.

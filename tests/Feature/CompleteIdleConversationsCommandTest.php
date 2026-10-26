@@ -3,8 +3,8 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
 use Jvjvjv\CodeTalker\Jobs\ProcessAiMemoryJob;
 use Jvjvjv\CodeTalker\Models\AiPersona;
@@ -27,19 +27,6 @@ class CompleteIdleConversationsCommandTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        // AiConversation::booted() assigns a uuid, but no package migration
-        // creates the column (host apps add it themselves).
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     private function makePersona(): AiPersona
@@ -88,7 +75,8 @@ class CompleteIdleConversationsCommandTest extends TestCase
         Queue::fake();
 
         $persona = $this->makePersona();
-        $conversation = $this->makeConversation($persona);
+        // Extraction needs someone to remember things about.
+        $conversation = $this->makeConversation($persona, ['visitor_email' => 'visitor@example.com']);
         $this->addMessage($conversation, 'user', now()->subMinutes(90));
         $this->addMessage($conversation, 'assistant', now()->subMinutes(89));
 
@@ -158,5 +146,66 @@ class CompleteIdleConversationsCommandTest extends TestCase
         );
 
         Queue::assertNotPushed(ProcessAiMemoryJob::class);
+    }
+    /**
+     * Each update drops the row out of the query being paged. Offset paging
+     * (each()) would then skip a chunk's worth of rows per page; paging by id
+     * does not, so a backlog larger than one chunk is completed in one run.
+     */
+    public function test_a_backlog_larger_than_one_chunk_is_completed_in_one_run(): void
+    {
+        Queue::fake();
+
+        $persona = $this->makePersona();
+        $idleAt = now()->subMinutes(90);
+
+        foreach (array_chunk(range(1, 1500), 250) as $batch) {
+            $conversationIds = [];
+
+            foreach ($batch as $_) {
+                $conversationIds[] = DB::table('ai_conversations')->insertGetId([
+                    'ai_system_id' => $persona->ai_system_id,
+                    'ai_persona_id' => $persona->id,
+                    'feature' => 'persona:test-bot',
+                    'status' => AiConversationStatus::Active->value,
+                    'created_at' => $idleAt,
+                    'updated_at' => $idleAt,
+                ]);
+            }
+
+            DB::table('ai_conversation_messages')->insert(array_map(static fn (int $id): array => [
+                'ai_conversation_id' => $id,
+                'role' => 'user',
+                'content' => 'Hello',
+                'created_at' => $idleAt,
+            ], $conversationIds));
+        }
+
+        $this->artisan('ai:complete-idle-conversations', ['--minutes' => 30])
+            ->expectsOutputToContain('Completed 1500 idle conversation(s)')
+            ->assertSuccessful();
+
+        $this->assertSame(0, AiConversation::where('status', AiConversationStatus::Active->value)->count());
+        $this->assertSame(1500, AiConversation::where('status', AiConversationStatus::Completed->value)->count());
+    }
+
+    /**
+     * A negative window would put the cutoff in the future and make every
+     * conversation look idle, including one mid-reply.
+     */
+    public function test_a_negative_idle_timeout_does_not_complete_live_conversations(): void
+    {
+        Queue::fake();
+        config()->set('code-talker.conversations.idle_timeout_minutes', -5);
+
+        $persona = $this->makePersona();
+        $conversation = $this->makeConversation($persona);
+        $this->addMessage($conversation, 'user', now()->addMinute());
+
+        $this->artisan('ai:complete-idle-conversations')
+            ->expectsOutputToContain('for 0 minute(s)')
+            ->assertSuccessful();
+
+        $this->assertSame(AiConversationStatus::Active, $conversation->fresh()->status);
     }
 }

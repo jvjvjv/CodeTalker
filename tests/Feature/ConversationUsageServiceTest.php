@@ -3,7 +3,6 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Enums\AiInteractionStatus;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiInteractionLog;
@@ -18,19 +17,6 @@ class ConversationUsageServiceTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        // AiConversation::booted() assigns a uuid, but no package migration
-        // creates the column (host apps add it themselves).
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     private function conversation(): AiConversation

@@ -55,7 +55,11 @@ export type StopReason = 'end_turn' | 'max_tokens' | 'tool_use' | 'incomplete';
  * Why the turn failed. Absent for a recoverable in-stream provider error and
  * for a transport-level failure.
  */
-export type ChatStreamErrorReason = 'max_stream_duration' | 'provider_error';
+export type ChatStreamErrorReason =
+    | 'max_stream_duration'
+    | 'provider_error'
+    | 'persona_unavailable'
+    | 'system_unavailable';
 
 /** Progress before any tokens arrive. */
 export interface StatusEvent {
@@ -100,6 +104,10 @@ export interface MessageStopEvent {
  */
 export interface ChatStreamErrorEvent {
     type: 'error';
+    /**
+     * Fixed, package-authored text chosen by `reason`. It never carries the
+     * provider's or transport's own error text, which goes to the host's log.
+     */
     message: string;
     reason?: ChatStreamErrorReason;
 }

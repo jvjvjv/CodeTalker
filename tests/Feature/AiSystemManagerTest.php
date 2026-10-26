@@ -11,6 +11,7 @@ use InvalidArgumentException;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Enums\AiSystemRole;
 use Jvjvjv\CodeTalker\Enums\ThinkingLevel;
+use Jvjvjv\CodeTalker\Models\AiOperator;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiSystemFeatureDefault;
@@ -331,6 +332,7 @@ class AiSystemManagerTest extends TestCase
             'provider' => 'openai-compatible',
             'model' => 'local-model',
             'max_tokens' => 1024,
+            'base_url' => 'http://localhost:8080/v1',
         ]);
 
         $this->assertTrue($system->exists);
@@ -902,5 +904,232 @@ class AiSystemManagerTest extends TestCase
             ['levels' => [], 'controls_effort' => false],
             $this->manager()->thinkingLevels(AiProvider::ElevenLabs, 'eleven_multilingual_v2'),
         );
+    }
+
+    // ------------------------------------------------------------ api key
+
+    public function test_an_update_can_rotate_the_api_key(): void
+    {
+        $system = $this->manager()->create($this->validAttributes());
+
+        $this->manager()->update($system, [
+            'name' => 'Test System',
+            'max_tokens' => 1024,
+            'api_key' => 'sk-ant-rotated',
+        ]);
+
+        $this->assertSame('sk-ant-rotated', $system->fresh()->api_key);
+    }
+
+    public function test_an_update_that_omits_or_blanks_the_api_key_keeps_it(): void
+    {
+        foreach ([[], ['api_key' => null], ['api_key' => '']] as $extra) {
+            $system = $this->manager()->create($this->validAttributes());
+
+            $this->manager()->update($system, ['name' => 'Renamed', 'max_tokens' => 1024] + $extra);
+
+            $this->assertSame('sk-ant-test', $system->fresh()->api_key);
+            $this->assertSame('Renamed', $system->fresh()->name);
+        }
+    }
+
+    public function test_an_update_keeps_a_local_systems_key_when_it_is_omitted(): void
+    {
+        // normalizeForPersistence() blanks a missing key for local providers;
+        // on update that must not overwrite the stored one.
+        $system = AiSystem::create([
+            'name' => 'Local',
+            'provider' => 'openai-compatible',
+            'api_key' => 'local-secret',
+            'model' => 'local-model',
+            'max_tokens' => 1024,
+            'base_url' => 'http://localhost:8080/v1',
+        ]);
+
+        $this->manager()->update($system, ['name' => 'Renamed', 'max_tokens' => 1024]);
+
+        $this->assertSame('local-secret', $system->fresh()->api_key);
+    }
+
+    // ------------------------------------------------------------- delete
+
+    public function test_deleting_a_system_deactivates_operators_and_releases_feature_claims(): void
+    {
+        $system = $this->manager()->create($this->validAttributes([
+            'feature_defaults' => ['persona:support', 'operator:orders'],
+        ]));
+
+        $operator = AiOperator::create([
+            'ai_system_id' => $system->id,
+            'name' => 'Order Processor',
+            'slug' => 'order-processor',
+            'prompt_template' => 'Process it.',
+            'is_active' => true,
+        ]);
+
+        $this->assertSame(0, $this->manager()->delete($system));
+
+        $this->assertFalse($operator->fresh()->is_active);
+        $this->assertSame(0, AiSystemFeatureDefault::where('ai_system_id', $system->id)->count());
+        $this->assertSame([], $this->manager()->claimedFeatures());
+        $this->assertSoftDeleted($system);
+    }
+
+    public function test_a_failed_delete_rolls_back_the_deactivations(): void
+    {
+        $system = $this->manager()->create($this->validAttributes([
+            'feature_defaults' => ['persona:support'],
+        ]));
+
+        $persona = AiPersona::create([
+            'ai_system_id' => $system->id,
+            'name' => 'Bot',
+            'slug' => 'bot',
+            'prompt_template' => 'You are {{persona_name}}.',
+            'is_active' => true,
+        ]);
+
+        AiSystem::deleting(static function (): void {
+            throw new \RuntimeException('boom');
+        });
+
+        try {
+            $this->manager()->delete($system);
+            $this->fail('The delete should have thrown.');
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertTrue($persona->fresh()->is_active);
+        $this->assertSame(['persona:support'], $this->manager()->claimedFeatures());
+        $this->assertNotSoftDeleted($system);
+    }
+
+    // --------------------------------------------------------- json shapes
+
+    /**
+     * @return array<string, array{string, string}>
+     */
+    public static function fieldsThatAreNotObjects(): array
+    {
+        return [
+            'config scalar' => ['config', 'true'],
+            'config list' => ['config', '[1,2]'],
+            'config provider_options string' => ['config', '{"provider_options":"x"}'],
+            'config provider_options list' => ['config', '{"provider_options":[1]}'],
+            'pricing_profile scalar' => ['pricing_profile', 'true'],
+            'pricing_profile list' => ['pricing_profile', '[1,2]'],
+        ];
+    }
+
+    #[DataProvider('fieldsThatAreNotObjects')]
+    public function test_a_json_field_that_is_not_an_object_is_rejected(string $field, string $json): void
+    {
+        try {
+            $this->manager()->create($this->validAttributes([$field => $json]));
+            $this->fail("{$field} {$json} should have been rejected.");
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey($field, $e->errors());
+        }
+
+        $this->assertSame(0, AiSystem::count());
+    }
+
+    public function test_an_empty_provider_options_object_is_accepted(): void
+    {
+        $system = $this->manager()->create($this->validAttributes([
+            'config' => '{"provider_options":{}}',
+        ]));
+
+        $this->assertSame(['provider_options' => []], $system->fresh()->config);
+    }
+
+    // ------------------------------------------------- base_url, temperature
+
+    public function test_an_openai_compatible_system_requires_a_base_url(): void
+    {
+        try {
+            $this->manager()->create([
+                'name' => 'Local',
+                'provider' => 'openai-compatible',
+                'model' => 'local-model',
+                'max_tokens' => 1024,
+            ]);
+            $this->fail('A missing base_url should have been rejected.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('base_url', $e->errors());
+        }
+    }
+
+    public function test_an_openai_compatible_update_is_satisfied_by_the_stored_base_url(): void
+    {
+        $system = $this->manager()->create([
+            'name' => 'Local',
+            'provider' => 'openai-compatible',
+            'model' => 'local-model',
+            'max_tokens' => 1024,
+            'base_url' => 'http://localhost:8080/v1',
+        ]);
+
+        $this->manager()->update($system, ['name' => 'Renamed', 'max_tokens' => 1024]);
+
+        $this->assertSame('http://localhost:8080/v1', $system->fresh()->base_url);
+    }
+
+    public function test_a_temperature_up_to_two_is_accepted(): void
+    {
+        $system = $this->manager()->create($this->validAttributes(['temperature' => 1.5]));
+
+        $this->assertEquals(1.5, $system->fresh()->temperature);
+    }
+
+    public function test_a_temperature_above_two_is_rejected(): void
+    {
+        $this->expectException(ValidationException::class);
+
+        $this->manager()->create($this->validAttributes(['temperature' => 2.1]));
+    }
+
+    // ------------------------------------------------- lm studio hydration
+
+    private function lmStudioSystem(array $capabilities = ['reasoning' => true, 'vision' => false, 'tools' => true, 'max_context_length' => 4096]): AiSystem
+    {
+        return AiSystem::create([
+            'name' => 'Local LM Studio',
+            'provider' => 'lm-studio',
+            'api_key' => 'lm-secret',
+            'model' => 'qwen3',
+            'max_tokens' => 1024,
+            'base_url' => 'http://lmstudio.test:1234',
+            'model_capabilities' => $capabilities,
+        ]);
+    }
+
+    public function test_lm_studio_hydration_sends_the_stored_api_key(): void
+    {
+        Http::fake(['*' => Http::response(['error' => 'unauthorized'], 401)]);
+
+        $system = $this->lmStudioSystem();
+
+        $this->manager()->update($system, ['name' => 'Renamed', 'max_tokens' => 1024]);
+
+        Http::assertSent(static fn ($request): bool => str_contains($request->url(), '/api/v1/models')
+            && $request->hasHeader('Authorization', 'Bearer lm-secret'));
+
+        // A refused listing is not a reason to fail the save or drop the flags.
+        $this->assertSame('Renamed', $system->fresh()->name);
+        $this->assertSame(4096, $system->fresh()->model_capabilities['max_context_length']);
+    }
+
+    public function test_an_unreachable_lm_studio_server_does_not_block_the_save(): void
+    {
+        Http::fake(['*' => static fn () => throw new \Illuminate\Http\Client\ConnectionException('Connection refused')]);
+
+        $system = $this->lmStudioSystem();
+        $before = $system->fresh()->model_capabilities;
+
+        $this->manager()->update($system, ['name' => 'Renamed', 'max_tokens' => 1024]);
+
+        $this->assertSame('Renamed', $system->fresh()->name);
+        $this->assertSame($before, $system->fresh()->model_capabilities);
     }
 }

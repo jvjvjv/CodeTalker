@@ -2,7 +2,9 @@
 
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Services\Mcp\ToolResultConverter;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\SearchWebTool;
 use Jvjvjv\CodeTalker\Support\ToolContext;
@@ -190,14 +192,49 @@ class SearchWebToolTest extends TestCase
 
         $this->assertSame([
             'results' => [],
-            'error' => 'Search failed on bing: connection refused',
+            'error' => 'Search failed on bing: transport failure',
         ], $result['results']['bing']);
 
         // The healthy engine is unaffected.
         $this->assertCount(1, $result['results']['duckduckgo']['results']);
 
         $this->assertStringContainsString('### Bing (none)', $result['markdown']);
-        $this->assertStringContainsString('- _Error_: Search failed on bing: connection refused', $result['markdown']);
+        $this->assertStringContainsString('- _Error_: Search failed on bing: transport failure', $result['markdown']);
+    }
+
+    public function test_a_transport_failure_keeps_the_request_url_and_key_from_the_model_and_the_log(): void
+    {
+        config()->set('code-talker.services.google.search_api_key', 'goog-secret-key');
+        config()->set('code-talker.services.google.search_engine_id', 'cx-123');
+
+        Http::fake([
+            'https://www.googleapis.com/*' => fn () => throw new ConnectionException(
+                'cURL error 28: Operation timed out for https://www.googleapis.com/customsearch/v1?key=goog-secret-key&cx=cx-123&q=laravel',
+            ),
+        ]);
+
+        $logged = [];
+        Log::listen(function ($event) use (&$logged): void {
+            $logged[] = ['message' => $event->message, 'context' => $event->context];
+        });
+
+        $result = $this->runTool(new SearchWebTool(new ToolContext()), [
+            'query' => 'laravel',
+            'engines' => ['google'],
+        ]);
+
+        $this->assertSame('Search failed on google: transport failure', $result['results']['google']['error']);
+
+        $encoded = json_encode($result);
+        $this->assertStringNotContainsString('goog-secret-key', $encoded);
+        $this->assertStringNotContainsString('googleapis.com', $encoded);
+        $this->assertStringNotContainsString('cURL error', $encoded);
+
+        $warning = collect($logged)->firstWhere('message', 'search-web engine search failed');
+        $this->assertNotNull($warning);
+        $this->assertStringContainsString('Operation timed out', $warning['context']['error']);
+        $this->assertStringContainsString('key=***', $warning['context']['error']);
+        $this->assertStringNotContainsString('goog-secret-key', json_encode($logged));
     }
 
     public function test_an_http_failure_reports_the_status_without_throwing(): void

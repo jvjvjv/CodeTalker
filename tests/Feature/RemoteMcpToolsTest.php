@@ -2,6 +2,7 @@
 
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\JsonSchema\JsonSchemaTypeFactory;
@@ -43,17 +44,6 @@ class RemoteMcpToolsTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     protected function tearDown(): void
@@ -151,6 +141,57 @@ class RemoteMcpToolsTest extends TestCase
     {
         $this->assertNotNull(RemoteToolSchema::unrepresentableReason(['type' => 'string']));
         $this->assertNull(RemoteToolSchema::unrepresentableReason(['type' => 'object', 'properties' => []]));
+    }
+
+    public function test_a_schema_whose_references_fan_out_is_refused_quickly(): void
+    {
+        // Six levels, each referencing the next ten times: 60 pointers, a
+        // few kilobytes, and a million nodes once inlined.
+        $defs = ['L6' => ['type' => 'string']];
+
+        for ($level = 5; $level >= 1; $level--) {
+            $properties = [];
+
+            for ($i = 0; $i < 10; $i++) {
+                $properties["p{$i}"] = ['$ref' => '#/$defs/L' . ($level + 1)];
+            }
+
+            $defs["L{$level}"] = ['type' => 'object', 'properties' => $properties];
+        }
+
+        $schema = ['type' => 'object', 'properties' => ['root' => ['$ref' => '#/$defs/L1']], '$defs' => $defs];
+
+        $server = $this->makeServer();
+        (new FakeMcpServer(self::MDN_URL, [['name' => 'bomb', 'inputSchema' => $schema]]))->fake();
+
+        $started = microtime(true);
+        $report = $this->sync($server);
+        $elapsed = microtime(true) - $started;
+
+        $this->assertLessThan(1.0, $elapsed);
+        $this->assertSame(1, $report['unrepresentable']);
+
+        $tool = AiMcpServerTool::where('remote_name', 'bomb')->firstOrFail();
+        $this->assertFalse($tool->representable);
+        $this->assertStringContainsString('budget', $tool->unrepresentable_reason);
+    }
+
+    public function test_the_schema_budget_refuses_size_reference_count_and_depth(): void
+    {
+        $big = ['type' => 'object', 'properties' => ['q' => ['type' => 'string', 'description' => str_repeat('x', RemoteToolSchema::MAX_BYTES)]]];
+        $this->assertStringContainsString('bytes', (string) RemoteToolSchema::unrepresentableReason($big));
+
+        $manyRefs = ['type' => 'object', 'properties' => [], '$defs' => ['S' => ['type' => 'string']]];
+        for ($i = 0; $i <= RemoteToolSchema::MAX_REFS; $i++) {
+            $manyRefs['properties']["p{$i}"] = ['$ref' => '#/$defs/S'];
+        }
+        $this->assertStringContainsString('$ref', (string) RemoteToolSchema::unrepresentableReason($manyRefs));
+
+        $deep = ['type' => 'string'];
+        for ($i = 0; $i < RemoteToolSchema::MAX_DEPTH; $i++) {
+            $deep = ['type' => 'object', 'properties' => ['n' => $deep]];
+        }
+        $this->assertStringContainsString('deeper', (string) RemoteToolSchema::unrepresentableReason($deep));
     }
 
     // ----------------------------------------------------------------- model
@@ -308,6 +349,113 @@ class RemoteMcpToolsTest extends TestCase
 
         $this->assertSame(1, AiMcpServerTool::where('exposed_name', 'mdn__a_b')->count());
         $this->assertSame(1, AiMcpServerTool::whereNull('exposed_name')->where('representable', false)->count());
+    }
+
+    public function test_a_failed_catalog_write_is_recorded_not_thrown(): void
+    {
+        $server = $this->syncedServer(['search']);
+        $syncedAt = $server->fresh()->last_synced_at;
+
+        $this->fake->setTools([FakeMcpServer::tool('search'), FakeMcpServer::tool('brand-new')]);
+
+        AiMcpServerTool::creating(function (): void {
+            throw new QueryException('testing', 'insert into "ai_mcp_server_tools" ...', [], new \RuntimeException('disk I/O error'));
+        });
+
+        $report = $this->sync($server);
+
+        $this->assertNotNull($report['error']);
+        $this->assertStringContainsString('Storing the synced catalog failed', $report['error']);
+        $this->assertSame(['mdn__search'], AiMcpServerTool::pluck('exposed_name')->all());
+
+        $fresh = $server->fresh();
+        $this->assertSame($report['error'], $fresh->last_sync_error);
+        $this->assertEquals($syncedAt, $fresh->last_synced_at);
+    }
+
+    public function test_an_exposed_name_passing_to_another_tool_succeeds_and_dispatches_an_event(): void
+    {
+        Event::fake([RemoteMcpToolDefinitionChanged::class]);
+
+        $server = $this->makeServer();
+        $fake = (new FakeMcpServer(self::MDN_URL, [FakeMcpServer::tool('a.b'), FakeMcpServer::tool('a/b')]))->fake();
+        $this->sync($server);
+
+        $this->assertSame('a.b', AiMcpServerTool::where('exposed_name', 'mdn__a_b')->value('remote_name'));
+
+        $fake->setTools([FakeMcpServer::tool('a/b')]);
+        $report = $this->sync($server);
+
+        $this->assertNull($report['error']);
+        $this->assertSame(['a/b'], AiMcpServerTool::pluck('remote_name')->all());
+        $this->assertSame('mdn__a_b', AiMcpServerTool::where('remote_name', 'a/b')->value('exposed_name'));
+        $this->assertTrue(AiMcpServerTool::where('remote_name', 'a/b')->value('representable'));
+
+        Event::assertDispatched(
+            RemoteMcpToolDefinitionChanged::class,
+            fn (RemoteMcpToolDefinitionChanged $event): bool => $event->server->is($server)
+                && $event->tool->remote_name === 'a/b',
+        );
+    }
+
+    public function test_endless_cursors_stop_at_the_page_bound_and_keep_the_catalog(): void
+    {
+        config(['code-talker.remote_mcp.max_tools' => 5]);
+        $server = $this->syncedServer(['search']);
+
+        $this->fake->setTools([[FakeMcpServer::tool('brand-new')]])->endlessPages();
+        $before = $this->fake->requests;
+
+        $report = $this->sync($server);
+
+        $this->assertStringContainsString('more than 5 pages', (string) $report['error']);
+        $this->assertSame($report['error'], $server->fresh()->last_sync_error);
+        $this->assertSame(['mdn__search'], AiMcpServerTool::pluck('exposed_name')->all());
+        $this->assertLessThan(20, $this->fake->requests - $before);
+    }
+
+    public function test_a_listing_over_the_tool_bound_fails_and_keeps_the_catalog(): void
+    {
+        config(['code-talker.remote_mcp.max_tools' => 2]);
+        $server = $this->syncedServer(['search']);
+
+        $this->fake->setTools([FakeMcpServer::tool('one'), FakeMcpServer::tool('two'), FakeMcpServer::tool('three')]);
+
+        $report = $this->sync($server);
+
+        $this->assertSame('Server lists more than 2 tools.', $report['error']);
+        $this->assertSame(['mdn__search'], AiMcpServerTool::pluck('exposed_name')->all());
+
+        // Meeting the bound exactly is fine.
+        $this->fake->setTools([FakeMcpServer::tool('one'), FakeMcpServer::tool('two')]);
+        $this->assertNull($this->sync($server)['error']);
+    }
+
+    public function test_overlong_names_and_titles_are_length_checked_before_the_write(): void
+    {
+        $server = $this->makeServer();
+        $longName = str_repeat('n', 300);
+
+        (new FakeMcpServer(self::MDN_URL, [
+            FakeMcpServer::tool($longName),
+            FakeMcpServer::tool('titled') + ['title' => str_repeat('t', 300)],
+        ]))->fake();
+
+        $report = $this->sync($server);
+
+        $this->assertNull($report['error']);
+        $this->assertSame(1, $report['unrepresentable']);
+
+        $long = AiMcpServerTool::where('remote_name', str_repeat('n', 255))->firstOrFail();
+        $this->assertFalse($long->representable);
+        $this->assertNull($long->exposed_name);
+        $this->assertStringContainsString('255', $long->unrepresentable_reason);
+
+        $this->assertSame(255, mb_strlen(AiMcpServerTool::where('remote_name', 'titled')->value('title')));
+
+        // A re-sync matches the stored row rather than inserting a duplicate.
+        $this->assertNull($this->sync($server)['error']);
+        $this->assertSame(2, AiMcpServerTool::count());
     }
 
     // ------------------------------------------------------------------ auth
@@ -473,6 +621,32 @@ class RemoteMcpToolsTest extends TestCase
         $this->assertSame('integer', $schema['properties']['opts']['properties']['limit']['type']);
     }
 
+    public function test_a_remote_schema_is_converted_once_per_registry_build(): void
+    {
+        $this->syncedServer(['search']);
+
+        $registry = $this->registry(['mdn__search']);
+        $first = collect($registry->toLaravelAiTools())->keyBy(fn (object $tool): string => $tool->name());
+        $second = collect($registry->toLaravelAiTools())->keyBy(fn (object $tool): string => $tool->name());
+
+        $factory = new JsonSchemaTypeFactory();
+
+        // The same Type instances every time: converted once, then reused by
+        // the registry's withhold check and by each schema() call.
+        $this->assertSame(
+            $first['mdn__search']->schema($factory)['q'],
+            $second['mdn__search']->schema($factory)['q'],
+        );
+        $this->assertSame(
+            $first['mdn__search']->schema($factory)['q'],
+            $first['mdn__search']->schema($factory)['q'],
+        );
+
+        // A new build — the next turn — converts afresh.
+        $next = collect($this->registry(['mdn__search'])->toLaravelAiTools())->keyBy(fn (object $tool): string => $tool->name());
+        $this->assertNotSame($first['mdn__search']->schema($factory)['q'], $next['mdn__search']->schema($factory)['q']);
+    }
+
     // ------------------------------------------------------------ invocation
 
     public function test_results_map_structured_then_text_then_error(): void
@@ -569,6 +743,63 @@ class RemoteMcpToolsTest extends TestCase
         $this->assertStringContainsString('Invalid params: q', $registry->dispatch('mdn__search', ['q' => 'bad'])['error']);
         $this->assertSame(['content' => 'ok'], $registry->dispatch('mdn__search', ['q' => 'good']));
         $this->assertCount(2, $fake->calls);
+    }
+
+    public function test_an_oversized_text_result_is_cut_to_the_cap_with_a_note(): void
+    {
+        config(['code-talker.remote_mcp.max_result_bytes' => 1000]);
+        $server = $this->makeServer();
+
+        (new FakeMcpServer(self::MDN_URL, [FakeMcpServer::tool('dump'), FakeMcpServer::tool('blob')]))
+            ->onCall('dump', fn () => ['content' => [['type' => 'text', 'text' => str_repeat('é', 5000)]]])
+            ->onCall('blob', fn () => ['content' => [], 'structuredContent' => ['rows' => array_fill(0, 500, 'row')]])
+            ->fake();
+        $this->sync($server);
+
+        $registry = $this->registry(['mdn__dump', 'mdn__blob']);
+
+        $text = $registry->dispatch('mdn__dump', ['q' => 'x']);
+        $this->assertTrue($text['truncated']);
+        $this->assertLessThanOrEqual(1000, strlen($text['content']));
+        $this->assertTrue(mb_check_encoding($text['content'], 'UTF-8'));
+        $this->assertStringContainsString('10000 bytes', $text['note']);
+
+        $structured = $registry->dispatch('mdn__blob', ['q' => 'x']);
+        $this->assertTrue($structured['truncated']);
+        $this->assertLessThanOrEqual(1000, strlen($structured['content']));
+    }
+
+    public function test_text_beside_empty_structured_content_reaches_the_model(): void
+    {
+        $server = $this->makeServer();
+
+        (new FakeMcpServer(self::MDN_URL, [FakeMcpServer::tool('search')]))
+            ->onCall('search', fn () => ['content' => [['type' => 'text', 'text' => 'Found it']], 'structuredContent' => (object) []])
+            ->fake();
+        $this->sync($server);
+
+        $this->assertSame(['content' => 'Found it'], $this->registry(['mdn__search'])->dispatch('mdn__search', ['q' => 'x']));
+    }
+
+    public function test_a_rejected_handshake_trips_the_breaker_and_reads_as_unavailable(): void
+    {
+        $this->syncedServer(['search', 'get-page']);
+
+        $this->fake->rejectInitialize();
+        $before = $this->fake->requests;
+
+        $registry = $this->registry(['mdn__search', 'mdn__get-page']);
+
+        $first = $registry->dispatch('mdn__search', ['q' => 'x']);
+        $attempted = $this->fake->requests - $before;
+        $second = $registry->dispatch('mdn__get-page', ['q' => 'x']);
+
+        $this->assertStringContainsString('mdn__search is unavailable', $first['error']);
+        $this->assertStringNotContainsString('rejected the call', $first['error']);
+        $this->assertStringContainsString('failed earlier in this turn', $second['error']);
+        $this->assertGreaterThan(0, $attempted);
+        $this->assertSame($attempted, $this->fake->requests - $before);
+        $this->assertSame([], $this->fake->calls);
     }
 
     // ------------------------------------------------------------ whole turn

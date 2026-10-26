@@ -4,6 +4,7 @@ namespace Jvjvjv\CodeTalker\Services\Management;
 
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
+use Jvjvjv\CodeTalker\Enums\AiSystemRole;
 use Jvjvjv\CodeTalker\Models\AiOperator;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiConversation;
@@ -49,7 +50,16 @@ class AiOperatorManager
                 Rule::unique('ai_operators', 'slug')->ignore($operator?->id),
             ],
             'description' => ['nullable', 'string'],
-            'ai_system_id' => ['required', 'integer', 'exists:ai_systems,id'],
+            // A deleted, inactive, or voice-role system saves fine and fails
+            // at the first turn, so it is refused here instead.
+            'ai_system_id' => [
+                'required',
+                'integer',
+                Rule::exists('ai_systems', 'id')
+                    ->whereNull('deleted_at')
+                    ->where('is_active', true)
+                    ->where('role', AiSystemRole::Chat->value),
+            ],
             'prompt_template' => ['required', 'string'],
             'allowed_tools' => ['nullable', 'array'],
             'allowed_tools.*' => ['string'],

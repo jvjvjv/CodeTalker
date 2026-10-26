@@ -143,6 +143,12 @@ class AiConversation extends Model
      */
     public function generateChatHash(): string
     {
+        // A row created before the uuid column existed has none, and md5('')
+        // would give every such row the same hash.
+        if (blank($this->uuid)) {
+            $this->uuid = (string) Str::uuid();
+        }
+
         $this->chat_hash = md5($this->uuid);
         $this->save();
 

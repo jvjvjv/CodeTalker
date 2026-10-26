@@ -3,7 +3,6 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
@@ -21,17 +20,6 @@ class ChatTurnLibraryTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     private function makePersona(array $attributes = []): AiPersona

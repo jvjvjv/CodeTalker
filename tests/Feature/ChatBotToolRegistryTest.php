@@ -3,12 +3,25 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Support\Facades\Http;
+use Jvjvjv\CodeTalker\CodeTalkerServiceProvider;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Services\Mcp\ChatBotToolRegistry;
 use Jvjvjv\CodeTalker\Tests\TestCase;
 
 class ChatBotToolRegistryTest extends TestCase
 {
+    private const CONTEXT_AWARE_DIRECTORY = __DIR__ . '/../Fixtures/ContextAware';
+
+    protected function tearDown(): void
+    {
+        $property = new \ReflectionProperty(CodeTalkerServiceProvider::class, 'toolDirectories');
+        $directories = $property->getValue();
+        unset($directories[self::CONTEXT_AWARE_DIRECTORY]);
+        $property->setValue(null, $directories);
+
+        parent::tearDown();
+    }
+
     private function registry(?array $allowedTools): ChatBotToolRegistry
     {
         $conversation = new AiConversation(['feature' => 'persona:test']);
@@ -101,5 +114,26 @@ class ChatBotToolRegistryTest extends TestCase
         $result = $this->registry(['fetch-web-page'])->dispatch('does-not-exist', []);
 
         $this->assertSame('Unknown tool: does-not-exist', $result['error']);
+    }
+
+    /**
+     * makeWith() overrides match by parameter name, so a tool whose
+     * ToolContext is not called `$context` used to get the container's
+     * default — the MCP transport's context, with no conversation.
+     */
+    public function test_a_tool_context_parameter_with_any_name_receives_the_conversation(): void
+    {
+        CodeTalkerServiceProvider::addToolDirectory(
+            self::CONTEXT_AWARE_DIRECTORY,
+            'Jvjvjv\\CodeTalker\\Tests\\Fixtures\\ContextAware\\',
+        );
+
+        $conversation = new AiConversation(['feature' => 'persona:test']);
+        $conversation->id = 4242;
+        $conversation->user_id = 7;
+
+        $result = (new ChatBotToolRegistry($conversation, ['report-context']))->dispatch('report-context', []);
+
+        $this->assertSame(['conversation_id' => 4242, 'user_id' => 7], $result);
     }
 }

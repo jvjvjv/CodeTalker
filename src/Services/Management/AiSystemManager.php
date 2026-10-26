@@ -3,6 +3,7 @@
 namespace Jvjvjv\CodeTalker\Services\Management;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use InvalidArgumentException;
@@ -68,13 +69,17 @@ class AiSystemManager
             // default, and has no use for a token limit.
             'model' => [$isVoice ? 'nullable' : 'required', 'string', 'max:255'],
             'max_tokens' => [$isVoice ? 'nullable' : 'required', 'integer', 'min:1', 'max:200000'],
+            // A generic OpenAI-compatible endpoint has no default host to fall
+            // back to. On update the stored value satisfies this.
+            'base_url' => ['required_if:provider,' . AiProvider::OpenAICompatible->value, 'nullable', 'string', 'url', 'max:255'],
         ]);
     }
 
     /**
-     * Update deliberately omits provider, model, and api_key: the first two are
-     * immutable once a system exists, because changing them invalidates the
-     * stored capability flags without any way to detect it.
+     * Update deliberately omits provider and model: they are immutable once a
+     * system exists, because changing them invalidates the stored capability
+     * flags without any way to detect it. `api_key` is accepted so a key can be
+     * rotated; a blank one keeps the stored key (see update()).
      *
      * @param AiSystem|null $system the system being updated; with it, a new
      *        `role` is checked against the stored provider, and a voice
@@ -85,6 +90,7 @@ class AiSystemManager
     {
         $rules = static::sharedRules();
         $rules['role'] = ['sometimes', 'string', Rule::in(AiSystemRole::values())];
+        $rules['api_key'] = ['nullable', 'string'];
 
         if ($system === null) {
             return $rules;
@@ -151,12 +157,12 @@ class AiSystemManager
             'api_version' => ['nullable', 'string', 'max:50'],
             'max_tokens' => ['required', 'integer', 'min:1', 'max:200000'],
             'context_length' => ['nullable', 'integer', 'min:1', 'max:200000'],
-            'temperature' => ['nullable', 'numeric', 'min:0', 'max:1'],
+            'temperature' => ['nullable', 'numeric', 'min:0', 'max:2'],
             'is_active' => ['boolean'],
             'system_prompt_id' => ['nullable', 'integer', 'exists:ai_system_prompts,id'],
             'custom_system_prompt' => ['nullable', 'string'],
-            'config' => ['nullable', 'json'],
-            'credentials' => ['nullable', 'json', static::credentialsRule()],
+            'config' => ['nullable', 'json', static::configRule()],
+            'credentials' => ['nullable', 'json', static::objectRule()],
             'auth_type' => ['nullable', 'string', 'max:50'],
             'endpoint_type' => ['nullable', 'string', 'max:50'],
             'stream_protocol' => ['nullable', 'string', 'max:50'],
@@ -172,7 +178,7 @@ class AiSystemManager
             'enable_thinking' => ['nullable', 'boolean'],
             'is_local_endpoint' => ['boolean'],
             // @deprecated Slated for removal from AiSystem entirely.
-            'pricing_profile' => ['nullable', 'json'],
+            'pricing_profile' => ['nullable', 'json', static::objectRule()],
             'feature_defaults' => ['nullable', 'array'],
             'feature_defaults.*' => $featureKeys === []
                 ? ['string', 'max:255']
@@ -197,15 +203,42 @@ class AiSystemManager
     }
 
     /**
-     * `credentials` is a free-form map, so only its outer shape is checked.
+     * For the free-form maps (`credentials`, `pricing_profile`), only the outer
+     * shape is checked.
      */
-    private static function credentialsRule(): \Closure
+    private static function objectRule(): \Closure
     {
         return static function (string $attribute, mixed $value, \Closure $fail): void {
             $decoded = is_string($value) ? json_decode($value, true) : $value;
 
             if ($decoded !== null && !static::isJsonObject($decoded)) {
                 $fail('The :attribute must decode to an object.');
+            }
+        };
+    }
+
+    /**
+     * `config` is free-form too, except that `provider_options` is spread into
+     * the provider request by AgentFactory, so anything but a map there fails
+     * at the first call rather than at the save.
+     */
+    private static function configRule(): \Closure
+    {
+        return static function (string $attribute, mixed $value, \Closure $fail): void {
+            $decoded = is_string($value) ? json_decode($value, true) : $value;
+
+            if ($decoded === null) {
+                return;
+            }
+
+            if (!static::isJsonObject($decoded)) {
+                $fail('The :attribute must decode to an object.');
+
+                return;
+            }
+
+            if (array_key_exists('provider_options', $decoded) && !static::isJsonObject($decoded['provider_options'])) {
+                $fail('The :attribute provider_options must be an object.');
             }
         };
     }
@@ -316,16 +349,23 @@ class AiSystemManager
         // "clear": a cleared web_tool_policy is an unrestricted one. An empty
         // object is the explicit way to clear either. This runs after the
         // decode on purpose — a JSON `null` is a string until then.
-        foreach (['credentials', 'web_tool_policy'] as $secret) {
+        // The API key follows the same rule, so a key is rotated by submitting
+        // a new one and kept by leaving the field alone.
+        foreach (['api_key', 'credentials', 'web_tool_policy'] as $secret) {
             if (array_key_exists($secret, $data) && ($data[$secret] === null || $data[$secret] === '')) {
                 unset($data[$secret]);
             }
         }
 
+        $keyGiven = array_key_exists('api_key', $data);
+
         // Capability hydration resolves against the provider, model, and
         // endpoint the system already has. They are re-attached only so the
         // capability service can read them, then discarded before the write so
         // provider and model stay immutable.
+        // The stored key is re-attached the same way, so hydration
+        // authenticates with it, and dropped again when none was submitted —
+        // otherwise normalizeForPersistence() would blank a local system's key.
         $data['provider'] = $system->provider;
         $data['model'] = $system->model;
 
@@ -333,10 +373,18 @@ class AiSystemManager
             $data['base_url'] = $system->base_url;
         }
 
+        if (!$keyGiven) {
+            $data['api_key'] = $system->api_key;
+        }
+
         $this->capabilities->normalizeForPersistence($data);
         $this->capabilities->hydrateForPersistence($data);
 
         unset($data['provider'], $data['model']);
+
+        if (!$keyGiven) {
+            unset($data['api_key']);
+        }
 
         if (array_key_exists('max_tokens', $data) && $data['max_tokens'] === null) {
             unset($data['max_tokens']);
@@ -350,24 +398,41 @@ class AiSystemManager
     }
 
     /**
-     * Soft-delete a system, deactivating any personas that reference it.
+     * Soft-delete a system, deactivating any personas and operators that
+     * reference it and releasing its feature-default claims.
      *
-     * The personas are deactivated rather than deleted so the relationship —
-     * and whatever conversation history hangs off it — survives.
+     * Personas and operators are deactivated rather than deleted so the
+     * relationship — and whatever conversation history hangs off it —
+     * survives. The claims are deleted because a soft-deleted system cannot
+     * serve them: left in place, AgentFactory::forFeature() would keep
+     * resolving to it and an edit form would still report them taken.
      *
      * @return int the number of personas deactivated
      */
     public function delete(AiSystem $system): int
     {
-        $personaCount = $system->personas()->count();
+        return DB::transaction(function () use ($system): int {
+            $personaCount = $system->personas()->count();
+            $operatorCount = $system->operators()->count();
 
-        if ($personaCount > 0) {
-            $system->personas()->update(['is_active' => false]);
-        }
+            if ($personaCount > 0) {
+                $system->personas()->update(['is_active' => false]);
+            }
 
-        $system->delete();
+            if ($operatorCount > 0) {
+                $system->operators()->update(['is_active' => false]);
 
-        return $personaCount;
+                Log::info('Deactivated operators of a deleted AI system.', [
+                    'ai_system_id' => $system->id,
+                    'operators' => $operatorCount,
+                ]);
+            }
+
+            $system->featureDefaults()->delete();
+            $system->delete();
+
+            return $personaCount;
+        });
     }
 
     /**

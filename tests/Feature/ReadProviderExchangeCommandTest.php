@@ -3,7 +3,6 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
@@ -14,19 +13,6 @@ use Jvjvjv\CodeTalker\Tests\TestCase;
 class ReadProviderExchangeCommandTest extends TestCase
 {
     use RefreshDatabase;
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        // AiConversation::booted() assigns a uuid, but no package migration
-        // creates the column (host apps add it themselves).
-        if (! Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
-    }
 
     /**
      * @return array{system: AiSystem, persona: AiPersona, conversation: AiConversation, request: AiLlmMessage, exchange: AiProviderExchange, orphan: AiProviderExchange}

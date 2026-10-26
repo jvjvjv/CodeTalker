@@ -228,6 +228,12 @@ return [
     | default_timeout_seconds  per-call timeout for a server that sets none
     | max_timeout_seconds      cap on any server's timeout. A blocking remote
     |                          call pauses the turn's heartbeat, so keep it low.
+    |                          The timeout bounds each request; a call on a cold
+    |                          session makes several (handshake, then the call).
+    | max_tools                most tools one server may list; a sync that finds
+    |                          more (or more pages) fails and keeps the catalog
+    | max_result_bytes         a remote tool result longer than this is cut to
+    |                          it, with a note, before the model sees it
     |
     */
 
@@ -235,6 +241,8 @@ return [
         'enabled' => env('CODE_TALKER_REMOTE_MCP_ENABLED', true),
         'default_timeout_seconds' => (int) env('CODE_TALKER_REMOTE_MCP_TIMEOUT', 10),
         'max_timeout_seconds' => (int) env('CODE_TALKER_REMOTE_MCP_MAX_TIMEOUT', 30),
+        'max_tools' => (int) env('CODE_TALKER_REMOTE_MCP_MAX_TOOLS', 500),
+        'max_result_bytes' => (int) env('CODE_TALKER_REMOTE_MCP_MAX_RESULT_BYTES', 100000),
     ],
 
     /*

@@ -7,9 +7,11 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Enums\AiTurnRunStatus;
 use Jvjvjv\CodeTalker\Models\AiTurnRun;
 use Jvjvjv\CodeTalker\Services\AiPersonaConversationService;
+use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnErrorMessage;
 use Jvjvjv\CodeTalker\Services\Conversation\TurnRunStore;
 use Throwable;
 
@@ -91,7 +93,33 @@ class RunConversationTurnJob implements ShouldQueue
 
                 $store->append($run, $event);
             }
+
+            // The yielded error carries only fixed text. The exception behind
+            // it is the generator's return value, and is what the run records
+            // for whoever investigates — the run row is never sent to a reader.
+            $failure = $events->getReturn();
+
+            if ($failure instanceof Throwable) {
+                $errorMessage = $failure->getMessage();
+            }
         } catch (Throwable $exception) {
+            Log::error('Detached conversation turn failed', [
+                'ai_turn_run_id' => $run->id,
+                'ai_conversation_id' => $run->ai_conversation_id,
+                'exception' => $exception,
+            ]);
+
+            // A reader replays the run's stored events, so without this one it
+            // would see the run end with neither an error nor a finish.
+            if (! $errorSeen) {
+                try {
+                    $store->append($run, TurnErrorMessage::event(TurnErrorMessage::PROVIDER_ERROR));
+                } catch (Throwable) {
+                    // The store itself may be what failed; the Failed status
+                    // below still ends the reader's wait.
+                }
+            }
+
             $store->finish($run, AiTurnRunStatus::Failed, $exception->getMessage());
 
             throw $exception;

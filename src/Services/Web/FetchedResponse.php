@@ -76,6 +76,25 @@ final class FetchedResponse
     }
 
     /**
+     * The same decoded response marked as a failure — a non-2xx whose body is
+     * still worth returning to the caller.
+     */
+    public function withError(string $error): self
+    {
+        return new self(
+            url: $this->url,
+            status: $this->status,
+            contentType: $this->contentType,
+            title: $this->title,
+            content: $this->content,
+            truncated: $this->truncated,
+            error: $error,
+            notes: $this->notes,
+            strippedHeaders: $this->strippedHeaders,
+        );
+    }
+
+    /**
      * The same response with additional caller-facing notes appended.
      *
      * @param array<int, string> $notes

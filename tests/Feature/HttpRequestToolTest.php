@@ -5,6 +5,7 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiSystem;
@@ -54,6 +55,7 @@ class HttpRequestToolTest extends TestCase
                             'localhost', '127.0.0.1' => ['127.0.0.1'],
                             'internal.test' => ['10.0.0.5'],
                             'metadata.test' => ['169.254.169.254'],
+                            'nowhere.test' => [],
                             default => ['93.184.216.34'],
                         };
                     }
@@ -207,10 +209,11 @@ class HttpRequestToolTest extends TestCase
     {
         Http::fake(['http://127.0.0.1:8000/*' => Http::response('{"ok":true}', 200, ['Content-Type' => 'application/json'])]);
 
+        // Inside a conversation: allow_private_hosts is not honored without one.
         $result = $this->runTool($this->input([
             'url' => 'http://127.0.0.1:8000/internal',
             'request_policy' => ['allowed_methods' => ['GET'], 'allow_private_hosts' => true],
-        ]));
+        ]), 'Internal Bot');
 
         $this->assertTrue($result['content']['ok']);
         Http::assertSentCount(1);
@@ -588,6 +591,37 @@ class HttpRequestToolTest extends TestCase
         });
     }
 
+    public function testACallerSuppliedCredentialDoesNotFollowADowngradeOrPortChangeOnTheSameHost(): void
+    {
+        $system = new AiSystem(['web_tool_policy' => ['allowed_domains' => ['api.example.com']]]);
+
+        Http::fake([
+            'https://api.example.com/redirect' => Http::response('', 302, ['Location' => 'http://api.example.com/plain']),
+            'http://api.example.com/plain' => Http::response('', 302, ['Location' => 'https://api.example.com:8443/other']),
+            'https://api.example.com:8443/other' => Http::response('{}', 200, ['Content-Type' => 'application/json']),
+        ]);
+
+        $this->runTool($this->input([
+            'url' => 'https://api.example.com/redirect',
+            'headers' => "Authorization: Bearer user-supplied-token\nX-Custom: kept-on-origin",
+            'request_policy' => [
+                'allowed_methods' => ['GET'],
+                'allowed_hosts' => ['api.example.com'],
+                'allow_credential_headers' => true,
+            ],
+        ]), null, $system);
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->url() === 'https://api.example.com/redirect'
+            && $request->hasHeader('Authorization', 'Bearer user-supplied-token')
+            && $request->hasHeader('X-Custom'));
+
+        foreach (['http://api.example.com/plain', 'https://api.example.com:8443/other'] as $url) {
+            Http::assertSent(fn (HttpRequest $request): bool => $request->url() === $url
+                && !$request->hasHeader('Authorization')
+                && !$request->hasHeader('X-Custom'));
+        }
+    }
+
     // ------------------------------------------------------------- decoding
 
     public function testItDecodesXmlWithoutResolvingExternalEntities(): void
@@ -864,5 +898,302 @@ class HttpRequestToolTest extends TestCase
 
         $this->assertStringContainsString('https://api.example.com/missing', $result['error']);
         $this->assertStringContainsString('404', $result['error']);
+    }
+
+    // -------------------------------------------------------------- redaction
+
+    public function testUrlSecretsAreRedactedFromTheErrorAndTheLog(): void
+    {
+        Log::spy();
+
+        Http::fake(function (): void {
+            throw new ConnectionException('cURL error 28: Operation timed out for https://api.example.com/v1?api_key=secret-value&page=2');
+        });
+
+        $result = $this->runTool($this->input(['url' => 'https://api.example.com/v1?api_key=secret-value&page=2']));
+
+        $this->assertStringNotContainsString('secret-value', $result['error']);
+        $this->assertStringContainsString('https://api.example.com/v1?api_key=***&page=2', $result['error']);
+
+        Log::shouldHaveReceived('warning')->withArgs(function (string $message, array $context): bool {
+            return !str_contains((string) json_encode($context), 'secret-value')
+                && str_contains((string) json_encode($context), 'api_key=***');
+        })->once();
+    }
+
+    public function testAUrlCarryingUserinfoIsRefusedWithoutEchoingIt(): void
+    {
+        Log::spy();
+        Http::fake();
+
+        $result = $this->runTool($this->input(['url' => 'https://tok@api.example.com/?api_key=x']));
+
+        $this->assertStringContainsString('Credentials in the URL', $result['error']);
+        $this->assertStringNotContainsString('tok@', $result['error']);
+        $this->assertStringNotContainsString('api_key=x', $result['error']);
+        Http::assertNothingSent();
+        Log::shouldNotHaveReceived('warning');
+    }
+
+    public function testARedirectToAUrlCarryingUserinfoIsRefusedWithoutEchoingIt(): void
+    {
+        Http::fake([
+            'https://api.example.com/*' => Http::response('', 302, ['Location' => 'https://tok:pw@other.example.com/?token=abc']),
+        ]);
+
+        $result = $this->runTool($this->input());
+
+        $this->assertStringContainsString('Credentials in the URL', $result['error']);
+        $this->assertStringContainsString('https://other.example.com/?token=***', $result['error']);
+        $this->assertStringNotContainsString('tok:pw', $result['error']);
+        $this->assertStringNotContainsString('abc', $result['error']);
+        Http::assertSentCount(1);
+    }
+
+    public function testRedactUrlStripsUserinfoAndMasksCredentialParameters(): void
+    {
+        $this->assertSame(
+            'https://host.test/p?key=***&q=ok&API_KEY=***&apikey=***&token=***&access_token=***&signature=***#frag',
+            WebFetcher::redactUrl('https://u:p@host.test/p?key=1&q=ok&API_KEY=2&apikey=3&token=4&access_token=5&signature=6#frag'),
+        );
+        $this->assertSame('https://host.test/plain', WebFetcher::redactUrl('https://host.test/plain'));
+    }
+
+    // ------------------------------------------------------- unresolvable host
+
+    public function testAnUnresolvableHostIsNotPinnedEvenWhenPrivateHostsArePermitted(): void
+    {
+        $captured = [];
+
+        Http::fake(function (HttpRequest $request, array $options) use (&$captured) {
+            $captured[] = $options['curl'][CURLOPT_RESOLVE] ?? null;
+
+            return Http::response('{}', 200, ['Content-Type' => 'application/json']);
+        });
+
+        $this->runTool($this->input([
+            'url' => 'http://nowhere.test/',
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_private_hosts' => true],
+        ]), 'Internal Bot');
+
+        $this->assertSame([null], $captured);
+    }
+
+    public function testAnUnresolvableHostIsRefusedWithoutAPolicy(): void
+    {
+        Http::fake();
+
+        $result = $this->runTool($this->input(['url' => 'https://nowhere.test/']));
+
+        $this->assertStringContainsString('nowhere.test', $result['error']);
+        Http::assertNothingSent();
+    }
+
+    // --------------------------------------------------------- MCP transport
+
+    public function testAnExternalCallerCannotDeclarePrivateHosts(): void
+    {
+        Http::fake();
+
+        $result = $this->runTool($this->input([
+            'url' => 'http://127.0.0.1:8000/internal',
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_private_hosts' => true],
+        ]));
+
+        $this->assertStringContainsString('cannot be declared on this transport', $result['error']);
+        Http::assertNothingSent();
+    }
+
+    public function testAnExternalCallerStillReachesPublicHosts(): void
+    {
+        Http::fake(['https://api.example.com/*' => Http::response('{"ok":true}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input());
+
+        $this->assertTrue($result['content']['ok']);
+        Http::assertSentCount(1);
+    }
+
+    // ------------------------------------------------- credential-like headers
+
+    public function testAnApiKeyHeaderIsStrippedOnAnUnrestrictedSystem(): void
+    {
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input([
+            'headers' => "X-Api-Key: invented\nX-Goog-Api-Key: invented",
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_credential_headers' => true],
+        ]));
+
+        Http::assertSent(fn (HttpRequest $request): bool => !$request->hasHeader('X-Api-Key') && !$request->hasHeader('X-Goog-Api-Key'));
+        $this->assertContains('X-Api-Key', $result['stripped_headers']);
+        $this->assertContains('X-Goog-Api-Key', $result['stripped_headers']);
+    }
+
+    public function testACustomHeaderDoesNotFollowACrossHostRedirectButABenignOneDoes(): void
+    {
+        Http::fake([
+            'https://api.example.com/*' => Http::response('', 302, ['Location' => 'https://other.example.com/landing']),
+            'https://other.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json']),
+        ]);
+
+        $this->runTool($this->input(['headers' => "X-Custom: for-the-first-host\nAccept: application/json"]));
+
+        Http::assertSent(fn (HttpRequest $request): bool => str_contains($request->url(), 'api.example.com')
+            && $request->hasHeader('X-Custom', 'for-the-first-host'));
+        Http::assertSent(fn (HttpRequest $request): bool => str_contains($request->url(), 'other.example.com')
+            && !$request->hasHeader('X-Custom')
+            && $request->hasHeader('Accept', 'application/json'));
+    }
+
+    public function testACustomHeaderFollowsASameHostRedirect(): void
+    {
+        Http::fake([
+            'https://api.example.com/old' => Http::response('', 302, ['Location' => '/new']),
+            'https://api.example.com/new' => Http::response('{}', 200, ['Content-Type' => 'application/json']),
+        ]);
+
+        $this->runTool($this->input(['url' => 'https://api.example.com/old', 'headers' => 'X-Custom: kept']));
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->url() === 'https://api.example.com/new'
+            && $request->hasHeader('X-Custom', 'kept'));
+    }
+
+    // ------------------------------------------------- credentials over TLS
+
+    public function testConfiguredCredentialsAreNotSentOverPlainHttp(): void
+    {
+        config(['code-talker.tools.http_request.credentials' => [
+            'api.example.com' => ['Authorization' => 'Bearer host-secret'],
+        ]]);
+
+        Http::fake(['http://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $this->runTool($this->input(['url' => 'http://api.example.com/v1/things']));
+
+        Http::assertSent(fn (HttpRequest $request): bool => !$request->hasHeader('Authorization'));
+    }
+
+    public function testConfiguredCredentialsAreSentOverHttps(): void
+    {
+        config(['code-talker.tools.http_request.credentials' => [
+            'api.example.com' => ['Authorization' => 'Bearer host-secret'],
+        ]]);
+
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $this->runTool($this->input());
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader('Authorization', 'Bearer host-secret'));
+    }
+
+    public function testConfiguredCredentialsAreSentToLoopbackOverPlainHttp(): void
+    {
+        config(['code-talker.tools.http_request.credentials' => [
+            '127.0.0.1' => ['Authorization' => 'Bearer local-secret'],
+        ]]);
+
+        Http::fake(['http://127.0.0.1:8000/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $this->runTool($this->input([
+            'url' => 'http://127.0.0.1:8000/',
+            'request_policy' => ['allowed_methods' => ['GET'], 'allow_private_hosts' => true],
+        ]), 'Internal Bot');
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader('Authorization', 'Bearer local-secret'));
+    }
+
+    public function testConfiguredCredentialsDoNotFollowAnHttpsToHttpRedirect(): void
+    {
+        config(['code-talker.tools.http_request.credentials' => [
+            'api.example.com' => ['Authorization' => 'Bearer host-secret'],
+        ]]);
+
+        Http::fake([
+            'https://api.example.com/*' => Http::response('', 302, ['Location' => 'http://api.example.com/plain']),
+            'http://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json']),
+        ]);
+
+        $this->runTool($this->input());
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->url() === 'http://api.example.com/plain'
+            && !$request->hasHeader('Authorization'));
+    }
+
+    // ------------------------------------------------------ malformed headers
+
+    public function testAMalformedHeaderIsDroppedAndReportedWhileTheRequestProceeds(): void
+    {
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $result = $this->runTool($this->input(['headers' => "Content Type: x\nX-Bad-Value: a\x01b\nX-Request-Id: ok"]));
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn (HttpRequest $request): bool => $request->hasHeader('X-Request-Id', 'ok')
+            && !$request->hasHeader('X-Bad-Value'));
+        $this->assertContains('Content Type', $result['stripped_headers']);
+        $this->assertContains('X-Bad-Value', $result['stripped_headers']);
+    }
+
+    // ------------------------------------------------------- redirect method
+
+    public function testARedirectInducedGetIsNotRefusedByAPostOnlyPolicy(): void
+    {
+        Http::fake([
+            'https://api.example.com/submit' => Http::response('', 302, ['Location' => '/done']),
+            'https://api.example.com/done' => Http::response('{"ok":true}', 200, ['Content-Type' => 'application/json']),
+        ]);
+
+        $result = $this->runTool($this->input([
+            'url' => 'https://api.example.com/submit',
+            'method' => 'POST',
+            'body' => '{"a":1}',
+            'request_policy' => ['allowed_methods' => ['POST']],
+        ]));
+
+        $this->assertTrue($result['content']['ok']);
+        Http::assertSent(fn (HttpRequest $request): bool => $request->url() === 'https://api.example.com/done'
+            && $request->method() === 'GET');
+    }
+
+    // ------------------------------------------------------ error response body
+
+    public function testANonSuccessStatusCarriesTheDecodedBody(): void
+    {
+        Http::fake(['https://api.example.com/*' => Http::response(
+            '{"errors":{"name":["required"]}}',
+            422,
+            ['Content-Type' => 'application/json'],
+        )]);
+
+        $result = $this->runTool($this->input(['method' => 'POST', 'request_policy' => ['allowed_methods' => ['POST']]]));
+
+        $this->assertStringContainsString('422', $result['error']);
+        $this->assertSame(422, $result['status']);
+        $this->assertSame(['name' => ['required']], $result['content']['errors']);
+    }
+
+    public function testANonSuccessStatusWithAnEmptyBodyIsAPlainError(): void
+    {
+        Http::fake(['https://api.example.com/*' => Http::response('', 500)]);
+
+        $result = $this->runTool($this->input());
+
+        $this->assertStringContainsString('500', $result['error']);
+        $this->assertArrayNotHasKey('content', $result);
+    }
+
+    // --------------------------------------------------------- accept-encoding
+
+    public function testItAdvertisesOnlyEncodingsCurlCanDecode(): void
+    {
+        Http::fake(['https://api.example.com/*' => Http::response('{}', 200, ['Content-Type' => 'application/json'])]);
+
+        $this->runTool($this->input());
+
+        $brotli = (curl_version()['features'] & CURL_VERSION_BROTLI) !== 0;
+
+        Http::assertSent(fn (HttpRequest $request): bool => $request->header('Accept-Encoding')[0]
+            === ($brotli ? 'gzip, deflate, br' : 'gzip, deflate'));
     }
 }

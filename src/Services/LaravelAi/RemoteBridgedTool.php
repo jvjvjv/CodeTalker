@@ -5,7 +5,7 @@ namespace Jvjvjv\CodeTalker\Services\LaravelAi;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\JsonSchema\Types\Type;
 use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolRegistryContract;
-use Jvjvjv\CodeTalker\Services\Mcp\Remote\RemoteToolSchema;
+use Jvjvjv\CodeTalker\Services\Mcp\Remote\RemoteToolHandler;
 use Laravel\Ai\Contracts\Tool;
 use Laravel\Ai\Tools\Request;
 use Stringable;
@@ -17,16 +17,17 @@ use Stringable;
  * own, which loses the root and so any `$ref` into root-level `$defs` — common
  * in remote schemas, and fatal to the request. This converts from the root.
  * Execution still routes through the registry, which contains failures.
+ *
+ * The converted schema comes from the handler, which converts once per
+ * registry build: the registry already converted it to decide whether to
+ * offer the tool at all.
  */
 class RemoteBridgedTool implements Tool
 {
-    /**
-     * @param array<string, mixed> $inputSchema Raw JSON Schema (input_schema) for the tool.
-     */
     public function __construct(
         private readonly string $toolName,
         private readonly string $toolDescription,
-        private readonly array $inputSchema,
+        private readonly RemoteToolHandler $handler,
         private readonly AiToolRegistryContract $registry,
     ) {
     }
@@ -46,7 +47,7 @@ class RemoteBridgedTool implements Tool
      */
     public function schema(JsonSchema $schema): array
     {
-        return RemoteToolSchema::properties($this->inputSchema);
+        return $this->handler->properties();
     }
 
     public function handle(Request $request): Stringable|string

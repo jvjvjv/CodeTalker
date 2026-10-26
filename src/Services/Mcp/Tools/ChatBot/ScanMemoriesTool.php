@@ -56,13 +56,21 @@ class ScanMemoriesTool extends Tool
 
     public function handle(Request $request): Response|ResponseFactory
     {
-        $topics = array_filter((array) ($request->get('topics') ?? []));
+        // The schema asks for strings, but nothing forces a model to comply:
+        // ignore anything that isn't a scalar rather than fail on it.
+        $topics = array_values(array_filter(
+            array_map(
+                fn ($topic) => is_scalar($topic) ? trim((string) $topic) : '',
+                (array) ($request->get('topics') ?? []),
+            ),
+            fn (string $topic) => $topic !== '',
+        ));
 
         if ($topics === []) {
             return Response::error('At least one topic is required.');
         }
 
-        if (!$this->context->hasIdentity()) {
+        if (!AiFeatureMemory::hasIdentity($this->context->userId, $this->context->visitorEmail)) {
             return Response::structured([
                 'memories' => [],
                 'message' => 'No user identity for this conversation.',
@@ -77,11 +85,8 @@ class ScanMemoriesTool extends Tool
             $query->forFeature($this->context->feature);
         }
 
-        if ($this->context->userId !== null) {
-            $query->where('user_id', $this->context->userId);
-        } else {
-            $query->where('visitor_email', $this->context->visitorEmail);
-        }
+        // A user id wins; a visitor email never matches a user's rows.
+        $query->forIdentity($this->context->userId, $this->context->visitorEmail);
 
         $query->where(function (Builder $q) use ($topics): void {
             foreach ($topics as $topic) {

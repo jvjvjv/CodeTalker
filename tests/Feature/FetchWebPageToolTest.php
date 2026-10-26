@@ -40,6 +40,7 @@ class FetchWebPageToolTest extends TestCase
                             'localhost', '127.0.0.1' => ['127.0.0.1'],
                             'internal.test' => ['10.0.0.5'],
                             'metadata.test' => ['169.254.169.254'],
+                            'nowhere.test' => [],
                             default => ['93.184.216.34'],
                         };
                     }
@@ -48,6 +49,17 @@ class FetchWebPageToolTest extends TestCase
                 return new WebFetcher($gate, $this->context->botName(), 'fetch-web-page', $this->context->webToolPolicy());
             }
         };
+    }
+
+    /**
+     * The context of the local chat loop, where allow_private_hosts is honored.
+     */
+    private function conversationContext(): ToolContext
+    {
+        $conversation = new AiConversation(['context' => []]);
+        $conversation->setRelation('aiPersona', new AiPersona(['name' => 'Research Bot']));
+
+        return ToolContext::forConversation($conversation);
     }
 
     /**
@@ -279,7 +291,7 @@ class FetchWebPageToolTest extends TestCase
     {
         Http::fake(['http://127.0.0.1/*' => Http::response('<html><body><p>Internal.</p></body></html>', 200, ['Content-Type' => 'text/html'])]);
 
-        $result = $this->runTool($this->tool(), [
+        $result = $this->runTool($this->tool($this->conversationContext()), [
             'url' => 'http://127.0.0.1/status',
             'request_policy' => ['allow_private_hosts' => true],
         ]);
@@ -398,11 +410,79 @@ class FetchWebPageToolTest extends TestCase
             return Http::response('<html><body><p>Hi</p></body></html>', 200, ['Content-Type' => 'text/html']);
         });
 
-        $this->runTool($this->tool(), [
+        $this->runTool($this->tool($this->conversationContext()), [
             'url' => 'http://127.0.0.1/status',
             'request_policy' => ['allow_private_hosts' => true],
         ]);
 
         $this->assertSame([null], $captured);
+    }
+
+    // ---------------------------------------------------------- MCP transport
+
+    public function testAnExternalCallerCannotDeclarePrivateHosts(): void
+    {
+        Http::fake();
+
+        // No conversation: the external MCP transport.
+        $result = $this->runTool($this->tool(), [
+            'url' => 'http://127.0.0.1/status',
+            'request_policy' => ['allow_private_hosts' => true],
+        ]);
+
+        $this->assertStringContainsString('cannot be declared on this transport', $result['error']);
+        Http::assertNothingSent();
+    }
+
+    public function testAnExternalCallerStillFetchesPublicPages(): void
+    {
+        Http::fake(['https://example.com/*' => Http::response('<html><body><p>Public.</p></body></html>', 200, ['Content-Type' => 'text/html'])]);
+
+        $result = $this->runTool($this->tool(), [
+            'url' => 'https://example.com/page',
+            'request_policy' => ['allowed_hosts' => ['example.com']],
+        ]);
+
+        $this->assertStringContainsString('Public.', $result['content']);
+        Http::assertSentCount(1);
+    }
+
+    public function testAUrlCarryingUserinfoIsRefused(): void
+    {
+        Http::fake();
+
+        $result = $this->runTool($this->tool(), ['url' => 'https://alice:hunter2@example.com/page']);
+
+        $this->assertStringContainsString('Credentials in the URL', $result['error']);
+        $this->assertStringNotContainsString('hunter2', $result['error']);
+        Http::assertNothingSent();
+    }
+
+    public function testAnUnresolvableHostIsNotPinnedEvenWhenPrivateHostsArePermitted(): void
+    {
+        $captured = [];
+
+        Http::fake(function (HttpRequest $request, array $options) use (&$captured) {
+            $captured[] = $options['curl'][CURLOPT_RESOLVE] ?? null;
+
+            return Http::response('<html><body><p>Hi</p></body></html>', 200, ['Content-Type' => 'text/html']);
+        });
+
+        $this->runTool($this->tool($this->conversationContext()), [
+            'url' => 'http://nowhere.test/',
+            'request_policy' => ['allow_private_hosts' => true],
+        ]);
+
+        $this->assertSame([null], $captured);
+    }
+
+    public function testANonSuccessStatusStillReturnsNoContent(): void
+    {
+        Http::fake(['https://example.com/*' => Http::response('<html><body>Gone</body></html>', 410, ['Content-Type' => 'text/html'])]);
+
+        $result = $this->runTool($this->tool(), ['url' => 'https://example.com/page']);
+
+        $this->assertSame('Failed to fetch https://example.com/page. The server responded with HTTP status 410 (Gone).', $result['error']);
+        $this->assertArrayNotHasKey('content', $result);
     }
 }

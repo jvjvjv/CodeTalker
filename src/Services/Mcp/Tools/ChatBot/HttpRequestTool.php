@@ -20,7 +20,7 @@ use Laravel\Mcp\Server\Tool;
     . 'Use this for APIs and non-HTML resources; use fetch-web-page for reading an ordinary web page. '
     . 'You MUST supply request_policy declaring the methods you intend to use, and whether you intend '
     . 'to reach private or loopback hosts. A request with no declared policy is refused before it is sent. '
-    . 'Authentication headers (Authorization, Cookie) are stripped by default; the host usually supplies '
+    . 'Authentication headers (Authorization, Cookie, X-Api-Key and similar) are stripped by default; the host usually supplies '
     . 'any that are needed. If you have been given a credential to use directly (e.g. one the user provided '
     . 'in conversation), TWO THINGS ARE BOTH REQUIRED, not just one: declare '
     . 'request_policy.allow_credential_headers: true, AND add the header as its own line in the headers '
@@ -118,18 +118,27 @@ class HttpRequestTool extends Tool
             return Response::error($refusal);
         }
 
+        [$headers, $malformedHeaders] = $this->parseHeaderLines((string) ($request->get('headers') ?? ''));
+
         $fetched = $this->fetcher()->request(
             method: $method,
             url: $url,
             policy: RequestPolicy::declared($declared),
             body: $this->bodyFrom($request),
-            headers: $this->parseHeaderLines((string) ($request->get('headers') ?? '')),
+            headers: $headers,
             keepHtml: (bool) $request->get('keep_html', false),
             targetSelector: trim((string) $request->get('target_selector', '')),
             truncate: (bool) $request->get('truncate_content', true),
+            fromExternalCaller: $this->context->conversation === null,
         );
 
-        if ($fetched->failed()) {
+        if ($malformedHeaders !== []) {
+            $fetched = $fetched->withStrippedHeaders([...$malformedHeaders, ...$fetched->strippedHeaders]);
+        }
+
+        // A non-2xx with a readable body is still an error, but the body is
+        // what the caller needs to correct the request, so it travels with it.
+        if ($fetched->failed() && $fetched->content === null) {
             return Response::error($fetched->error);
         }
 
@@ -151,6 +160,11 @@ class HttpRequestTool extends Tool
 
         if ($fetched->strippedHeaders !== []) {
             $payload['stripped_headers'] = $fetched->strippedHeaders;
+        }
+
+        if ($fetched->failed()) {
+            return Response::make(Response::error($fetched->error))
+                ->withStructuredContent(['error' => $fetched->error, ...$payload]);
         }
 
         return Response::structured($payload);
@@ -213,11 +227,16 @@ class HttpRequestTool extends Tool
      * when the same model correctly wrote out the equivalent JSON when just
      * asked to describe the call in prose rather than actually emit it.
      *
-     * @return array<string, string>
+     * A name that is not an RFC 7230 token, or a value carrying control
+     * characters, is dropped and reported rather than sent — the HTTP client
+     * would otherwise throw while building the request.
+     *
+     * @return array{0: array<string, string>, 1: array<int, string>} Headers, and the names of malformed lines dropped
      */
     private function parseHeaderLines(string $text): array
     {
         $headers = [];
+        $malformed = [];
 
         foreach (preg_split('/\r\n|\r|\n/', $text) ?: [] as $line) {
             $colon = strpos($line, ':');
@@ -229,11 +248,20 @@ class HttpRequestTool extends Tool
             $name = trim(substr($line, 0, $colon));
             $value = trim(substr($line, $colon + 1));
 
-            if ($name !== '') {
-                $headers[$name] = $value;
+            if ($name === '') {
+                continue;
             }
+
+            if (preg_match('/^[!#$%&\'*+\-.^_`|~0-9A-Za-z]+$/', $name) !== 1
+                || preg_match('/^[\x20\x09\x21-\x7E\x80-\xFF]*$/', $value) !== 1) {
+                $malformed[] = $name;
+
+                continue;
+            }
+
+            $headers[$name] = $value;
         }
 
-        return $headers;
+        return [$headers, $malformed];
     }
 }

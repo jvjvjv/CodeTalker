@@ -5,7 +5,6 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Models\AiProviderExchange;
@@ -20,17 +19,6 @@ class RawExchangeChatIntegrationTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        if (! Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     public function test_streaming_chat_turn_records_a_provider_exchange(): void

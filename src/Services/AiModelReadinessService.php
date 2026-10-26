@@ -2,6 +2,7 @@
 
 namespace Jvjvjv\CodeTalker\Services;
 
+use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiSystem;
@@ -71,10 +72,18 @@ class AiModelReadinessService
                 message: 'Model is not available from this provider.',
             );
         } catch (Throwable $exception) {
+            // The status is rendered to visitors, and transport messages name the
+            // provider URL, so the detail goes to the log only.
+            Log::warning('AI system readiness check failed', [
+                'ai_system_id' => $system->getKey(),
+                'provider' => $system->provider,
+                'exception' => $exception,
+            ]);
+
             return $this->statusPayload(
                 state: 'unavailable',
                 system: $system,
-                message: 'Provider is unavailable: ' . $exception->getMessage(),
+                message: 'Provider is unavailable.',
             );
         }
     }
