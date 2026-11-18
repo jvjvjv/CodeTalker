@@ -94,6 +94,16 @@ class AiMemoryManager
      */
     public function create(array $data): AiFeatureMemory
     {
+        // A blank identity is no identity. Normalised before validation, not
+        // left to a host's HTTP middleware: a library caller passing
+        // `user_id => ''` would otherwise store a memory that the visitor
+        // scope (`user_id IS NULL`) can never read.
+        foreach (['user_id', 'visitor_email'] as $field) {
+            if (array_key_exists($field, $data) && is_string($data[$field]) && trim($data[$field]) === '') {
+                $data[$field] = null;
+            }
+        }
+
         return AiFeatureMemory::create(
             Validator::make($data, static::createRules())->validate()
         );

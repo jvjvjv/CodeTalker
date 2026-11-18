@@ -17,9 +17,15 @@ return new class extends Migration
             return;
         }
 
+        // Raw SQL bypasses the query builder, so the connection's table prefix
+        // has to be applied here. The quoted name also works as the text
+        // argument to pg_get_serial_sequence(), which parses it as an
+        // identifier.
+        $table = DB::connection()->getQueryGrammar()->wrapTable('ai_system_prompts');
+
         DB::statement(
-            "select setval(pg_get_serial_sequence('ai_system_prompts', 'id'), "
-            . 'coalesce((select max(id) from ai_system_prompts), 1))'
+            "select setval(pg_get_serial_sequence('{$table}', 'id'), "
+            . "coalesce((select max(id) from {$table}), 1))"
         );
     }
 

@@ -131,6 +131,50 @@ class MemoryScopingTest extends TestCase
         $this->assertSame('Something learned', $memory->content);
     }
 
+    // ------------------------------------------------------ operator runs
+
+    private function makeOperator(): AiOperator
+    {
+        return AiOperator::create([
+            'ai_system_id' => $this->makeSystem()->id,
+            'name' => 'Test Operator',
+            'slug' => 'test-operator-' . uniqid(),
+            'prompt_template' => 'Do the thing.',
+            'is_active' => true,
+        ]);
+    }
+
+    public function test_an_operator_run_with_an_identity_is_not_analysed(): void
+    {
+        $this->fakeAnalysis(['add' => [['key' => 'from-operator', 'content' => 'x']], 'update' => [], 'remove' => []]);
+
+        $conversation = $this->makeConversation(['ai_operator_id' => $this->makeOperator()->id, 'user_id' => 7]);
+
+        $this->service()->processCompletedConversation($conversation, 7);
+
+        Http::assertNothingSent();
+        $this->assertSame(0, AiFeatureMemory::count());
+    }
+
+    public function test_a_rebuild_with_only_ineligible_conversations_leaves_memories_active(): void
+    {
+        $this->fakeAnalysis(['add' => [], 'update' => [], 'remove' => []]);
+
+        $this->memory(['key' => 'user-pref', 'user_id' => '7']);
+
+        $this->makeConversation(['status' => AiConversationStatus::Completed]);
+        $this->makeConversation([
+            'status' => AiConversationStatus::Completed,
+            'ai_operator_id' => $this->makeOperator()->id,
+            'user_id' => 7,
+        ]);
+
+        $this->service()->rebuildMemories(self::FEATURE);
+
+        Http::assertNothingSent();
+        $this->assertSame(1, AiFeatureMemory::query()->active()->count());
+    }
+
     // ------------------------------------------------------ one identity per row
 
     public function test_memories_extracted_for_a_user_store_no_visitor_email(): void
@@ -304,5 +348,23 @@ class MemoryScopingTest extends TestCase
             $manager->create(['key' => 'k2'] + $base + ['visitor_email' => 'visitor@example.com'])->visitor_email,
         );
         $this->assertSame(2, AiFeatureMemory::count());
+    }
+
+    public function test_a_blank_user_id_is_stored_as_none_so_the_visitor_can_read_the_memory(): void
+    {
+        $memory = $this->app->make(AiMemoryManager::class)->create([
+            'feature' => self::FEATURE,
+            'category' => 'preference',
+            'key' => 'k',
+            'content' => 'x',
+            'confidence' => 50,
+            'user_id' => '',
+            'visitor_email' => 'visitor@example.com',
+        ]);
+
+        $this->assertNull($memory->fresh()->user_id);
+        $this->assertTrue(
+            AiFeatureMemory::query()->forVisitor('visitor@example.com')->whereKey($memory->id)->exists()
+        );
     }
 }

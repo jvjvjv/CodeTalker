@@ -206,9 +206,12 @@ class AiMemoryService
     public function processCompletedConversation(AiConversation $conversation, string|int|null $userId = null, ?string $visitorEmail = null): void
     {
         // An anonymous conversation has no one to remember things about, and
-        // its operations could only be applied unscoped. Skip before the
-        // provider call.
-        if (!AiFeatureMemory::hasIdentity($userId, $visitorEmail)) {
+        // its operations could only be applied unscoped. An operator run is
+        // machine work, not a person's conversation, even when it carries the
+        // id of the user it ran for. Both are skipped before the provider call,
+        // here and not only in the observer: rebuildMemories() and a directly
+        // dispatched ProcessAiMemoryJob reach this method without it.
+        if (!AiFeatureMemory::hasIdentity($userId, $visitorEmail) || $conversation->ai_operator_id !== null) {
             return;
         }
 
@@ -232,9 +235,19 @@ class AiMemoryService
      */
     public function rebuildMemories(string $feature): void
     {
+        // Only conversations processCompletedConversation() will analyse: an
+        // operator run or an anonymous conversation counted here would let the
+        // deactivation below run with nothing to rebuild from.
         $conversations = AiConversation::query()
             ->where('feature', $feature)
             ->where('status', AiConversationStatus::Completed)
+            ->whereNull('ai_operator_id')
+            // user_id is a foreign key (an integer for most user models), so
+            // it is not compared with '': Postgres rejects that for a bigint.
+            ->where(function ($query): void {
+                $query->whereNotNull('user_id')
+                    ->orWhere(fn ($q) => $q->whereNotNull('visitor_email')->where('visitor_email', '!=', ''));
+            })
             ->orderBy('created_at')
             ->get();
 
@@ -242,7 +255,7 @@ class AiMemoryService
         // them here would destroy every memory for the feature and replace it
         // with nothing.
         if ($conversations->isEmpty()) {
-            Log::warning('AI Memory rebuild found no completed conversations; existing memories left untouched', [
+            Log::warning('AI Memory rebuild found no eligible completed conversations; existing memories left untouched', [
                 'feature' => $feature,
             ]);
 

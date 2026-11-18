@@ -34,6 +34,13 @@ return new class extends Migration
                 }
             });
 
+        // An empty user_id is no identity (AiFeatureMemory::hasIdentity()), and
+        // the visitor scope matches only a null one. Normalise it first so the
+        // next step does not strip a visitor memory of its only identity.
+        DB::table('ai_feature_memories')
+            ->where('user_id', '')
+            ->update(['user_id' => null]);
+
         // A memory written for an authenticated user belongs to that user
         // alone; a visitor_email on the same row would let a visitor who
         // types that address read it.

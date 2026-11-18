@@ -116,6 +116,22 @@ class AiMcpServerManagerTest extends TestCase
         }
     }
 
+    public function test_the_published_update_rules_accept_a_json_null_auth(): void
+    {
+        $this->assertFalse(
+            Validator::make(['name' => 'MDN', 'url' => self::URL, 'auth' => 'null'], AiMcpServerManager::updateRules())->fails()
+        );
+    }
+
+    public function test_a_json_null_auth_on_create_stores_no_auth(): void
+    {
+        (new FakeMcpServer(self::URL, [FakeMcpServer::tool('search')]))->fake();
+
+        $server = $this->manager()->create($this->validData(['auth' => 'null']))['server'];
+
+        $this->assertNull($server->fresh()->auth);
+    }
+
     public function test_a_duplicate_slug_is_rejected(): void
     {
         (new FakeMcpServer(self::URL))->fake();

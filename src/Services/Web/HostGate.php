@@ -231,8 +231,11 @@ class HostGate
      * The IP addresses a host maps to — the literal itself, or its DNS records.
      *
      * Empty when the name does not resolve. {@see isPrivateHost()} treats that
-     * as private, and {@see validatedAddressFor()} as nothing to pin. `localhost`
-     * is resolved like any other name.
+     * as private, and {@see validatedAddressFor()} as nothing to pin.
+     * `localhost` is always `127.0.0.1` (RFC 6761 reserves it for loopback):
+     * dns_get_record() does not read the hosts file, so without this a
+     * permitted `http://localhost` would go unpinned and lose the loopback
+     * exemption that lets configured credentials attach over plain http.
      *
      * Protected because it is the seam that keeps tests off the network: a test
      * subclass overrides it with a fixed host-to-address map.
@@ -247,6 +250,23 @@ class HostGate
             return [$unbracketed];
         }
 
+        if (strtolower($host) === 'localhost') {
+            return ['127.0.0.1'];
+        }
+
+        return $this->dnsAddressesFor($host);
+    }
+
+    /**
+     * The A and AAAA records DNS returns for a name; empty when it has none.
+     *
+     * Protected so a test can stand in for DNS while still exercising
+     * {@see addressesFor()}'s own rules.
+     *
+     * @return array<int, string>
+     */
+    protected function dnsAddressesFor(string $host): array
+    {
         $records = @dns_get_record($host, DNS_A | DNS_AAAA);
 
         if ($records === false || $records === []) {

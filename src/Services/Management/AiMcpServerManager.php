@@ -82,6 +82,15 @@ class AiMcpServerManager
     private static function authRule(): Closure
     {
         return static function (string $attribute, mixed $value, Closure $fail): void {
+            // A JSON `null` is what a blank secret field can submit, and
+            // update() reads it as "unchanged". The published rules accept it
+            // too, so a host form request built from them does not reject it
+            // before update() is reached. On create it stores no auth, as a
+            // real null does.
+            if (is_string($value) && json_validate($value) && json_decode($value) === null) {
+                return;
+            }
+
             $auth = is_string($value) ? json_decode($value, true) : $value;
 
             if (!is_array($auth)) {

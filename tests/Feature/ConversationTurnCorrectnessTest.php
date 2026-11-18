@@ -240,6 +240,41 @@ class ConversationTurnCorrectnessTest extends TestCase
         $this->assertSame(0, AiConversationMessage::where('role', 'user')->count());
     }
 
+    public function test_a_persona_deactivated_after_the_caller_loaded_it_still_ends_the_turn(): void
+    {
+        Queue::fake();
+        CodeTalkerAgent::fake(['Should never be produced']);
+
+        $persona = $this->makePersona();
+        $service = $this->service();
+        $conversation = $service->startConversation($persona)->fresh()->load(['aiPersona', 'aiSystem']);
+
+        // Deactivated elsewhere, after the relation was loaded.
+        AiPersona::whereKey($persona->id)->update(['is_active' => false]);
+
+        [$events] = $this->drain($service->continueConversation($conversation, 'Hi'));
+
+        $this->assertSame([TurnErrorMessage::event('persona_unavailable')], $events);
+        $this->assertSame(0, AiLlmMessage::count());
+    }
+
+    public function test_a_system_deleted_after_the_caller_loaded_it_still_ends_the_turn(): void
+    {
+        Queue::fake();
+        CodeTalkerAgent::fake(['Should never be produced']);
+
+        $persona = $this->makePersona();
+        $service = $this->service();
+        $conversation = $service->startConversation($persona)->fresh()->load(['aiPersona', 'aiSystem']);
+
+        AiSystem::find($persona->ai_system_id)->delete();
+
+        [$events] = $this->drain($service->continueConversation($conversation, 'Hi'));
+
+        $this->assertSame([TurnErrorMessage::event('system_unavailable')], $events);
+        $this->assertSame(0, AiLlmMessage::count());
+    }
+
     public function test_a_deleted_system_ends_the_turn_with_an_error_instead_of_throwing(): void
     {
         Queue::fake();

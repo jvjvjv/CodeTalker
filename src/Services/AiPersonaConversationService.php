@@ -158,7 +158,12 @@ class AiPersonaConversationService
      */
     public function continueConversation(AiConversation $conversation, string $userMessage): Generator
     {
-        $conversation->loadMissing(['aiSystem', 'aiPersona', 'messages']);
+        // The persona and system are reloaded even when the caller preloaded
+        // them: the availability check below must see whether they are still
+        // usable now, not when the caller fetched them. The model itself is
+        // not refreshed, which would discard attributes the caller has set
+        // but not saved.
+        $conversation->load(['aiSystem', 'aiPersona'])->loadMissing('messages');
 
         // The controller used to do this on every message. It is not just a
         // header value — it migrates a stale hash — so it moves here rather

@@ -66,6 +66,23 @@ class HostGateTest extends TestCase
         $this->assertNull($gate->validatedAddressFor('http://nowhere.test/'));
     }
 
+    public function testLocalhostIsLoopbackWithoutADnsLookup(): void
+    {
+        // DNS that knows nothing, as on a host whose resolver does not answer
+        // for localhost; dns_get_record() never reads the hosts file.
+        $gate = new class('refused: %s') extends HostGate {
+            /** @return array<int, string> */
+            protected function dnsAddressesFor(string $host): array
+            {
+                return [];
+            }
+        };
+
+        $this->assertSame('refused: localhost', $gate->refuse('http://localhost:8080/', 'GET', RequestPolicy::publicHostsOnly()));
+        $this->assertNull($gate->refuse('http://LocalHost:8080/', 'GET', $this->permissive()));
+        $this->assertSame('127.0.0.1', $gate->validatedAddressFor('http://LocalHost:8080/'));
+    }
+
     public function testAHostWithAnyPrivateAddressIsRefused(): void
     {
         $this->assertSame('refused: mixed.test', $this->refuse('https://mixed.test/'));

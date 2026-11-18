@@ -96,6 +96,26 @@ class InstallMigrationsTest extends TestCase
         $this->assertSame('7', DB::table('ai_feature_memories')->value('user_id'));
     }
 
+    public function test_the_migration_keeps_the_visitor_email_of_a_memory_with_an_empty_user_id(): void
+    {
+        DB::table('ai_feature_memories')->insert([
+            'feature' => 'persona:test',
+            'category' => 'preference',
+            'key' => 'units',
+            'content' => 'Prefers metric units.',
+            'user_id' => '',
+            'visitor_email' => 'someone@example.com',
+            'is_active' => true,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        $this->uuidMigration()->up();
+
+        $this->assertNull(DB::table('ai_feature_memories')->value('user_id'));
+        $this->assertSame('someone@example.com', DB::table('ai_feature_memories')->value('visitor_email'));
+    }
+
     public function test_a_conversation_without_a_uuid_gets_a_distinct_chat_hash(): void
     {
         $system = $this->makeSystem();
@@ -119,19 +139,41 @@ class InstallMigrationsTest extends TestCase
 
     public function test_the_prompt_sequence_is_advanced_on_postgres(): void
     {
-        // Pretend mode compiles the statement against a pgsql connection
-        // without connecting.
-        config()->set('database.connections.pretend_pgsql', [
+        $this->assertSame(
+            ['select setval(pg_get_serial_sequence(\'"ai_system_prompts"\', \'id\'), coalesce((select max(id) from "ai_system_prompts"), 1))'],
+            $this->pretendSequenceMigrationOnPostgres(''),
+        );
+    }
+
+    public function test_the_prompt_sequence_honours_the_table_prefix(): void
+    {
+        $this->assertSame(
+            ['select setval(pg_get_serial_sequence(\'"ct_ai_system_prompts"\', \'id\'), coalesce((select max(id) from "ct_ai_system_prompts"), 1))'],
+            $this->pretendSequenceMigrationOnPostgres('ct_'),
+        );
+    }
+
+    /**
+     * Pretend mode compiles the statement against a pgsql connection without
+     * connecting.
+     *
+     * @return array<int, string>
+     */
+    private function pretendSequenceMigrationOnPostgres(string $prefix): array
+    {
+        $name = 'pretend_pgsql_' . ($prefix === '' ? 'plain' : 'prefixed');
+
+        config()->set("database.connections.{$name}", [
             'driver' => 'pgsql',
             'host' => '127.0.0.1',
             'database' => 'pretend',
             'username' => 'pretend',
             'password' => '',
-            'prefix' => '',
+            'prefix' => $prefix,
         ]);
 
         $original = DB::getDefaultConnection();
-        DB::setDefaultConnection('pretend_pgsql');
+        DB::setDefaultConnection($name);
 
         try {
             $queries = DB::connection()->pretend(fn () => $this->sequenceMigration()->up());
@@ -139,10 +181,7 @@ class InstallMigrationsTest extends TestCase
             DB::setDefaultConnection($original);
         }
 
-        $this->assertSame(
-            ["select setval(pg_get_serial_sequence('ai_system_prompts', 'id'), coalesce((select max(id) from ai_system_prompts), 1))"],
-            array_column($queries, 'query'),
-        );
+        return array_column($queries, 'query');
     }
 
     public function test_the_prompt_sequence_migration_is_a_no_op_elsewhere(): void
