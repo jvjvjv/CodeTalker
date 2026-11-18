@@ -1132,4 +1132,22 @@ class AiSystemManagerTest extends TestCase
         $this->assertSame('Renamed', $system->fresh()->name);
         $this->assertSame($before, $system->fresh()->model_capabilities);
     }
+
+    public function test_an_lm_studio_hydration_failure_is_logged_with_its_credentials_masked(): void
+    {
+        \Illuminate\Support\Facades\Log::spy();
+        Http::fake(['*' => static fn () => throw new \Illuminate\Http\Client\ConnectionException(
+            'cURL error 7: Failed to connect for http://user:pw-secret@lmstudio.test:1234/api/v1/models?token=t-secret'
+        )]);
+
+        $this->manager()->update($this->lmStudioSystem(), ['name' => 'Renamed', 'max_tokens' => 1024]);
+
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message, array $context): bool => str_starts_with($message, 'Could not resolve LM Studio capabilities')
+                && $context['exception'] === \Illuminate\Http\Client\ConnectionException::class
+                && str_contains($context['error'], 'lmstudio.test:1234')
+                && !str_contains(json_encode($context), 'pw-secret')
+                && !str_contains(json_encode($context), 't-secret'),
+        );
+    }
 }

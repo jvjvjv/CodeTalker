@@ -7,6 +7,7 @@ use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 use Throwable;
 
 class AiModelReadinessService
@@ -77,7 +78,7 @@ class AiModelReadinessService
             Log::warning('AI system readiness check failed', [
                 'ai_system_id' => $system->getKey(),
                 'provider' => $system->provider,
-                'exception' => $exception,
+                ...RedactedException::context($exception),
             ]);
 
             return $this->statusPayload(

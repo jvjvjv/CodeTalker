@@ -125,7 +125,29 @@ class ProviderModelsClientTest extends TestCase
 
         Log::shouldHaveReceived('warning')->withArgs(
             fn (string $message, array $context): bool => $message === 'Listing provider models failed'
-                && $context['exception'] instanceof RequestException,
+                && $context === ['provider' => 'openai', 'exception' => RequestException::class, 'status' => 401],
+        );
+    }
+
+    public function test_an_unreachable_provider_is_logged_with_its_credentials_masked(): void
+    {
+        Log::spy();
+        Http::fake(fn () => throw new ConnectionException(
+            'cURL error 7: Failed to connect for https://user:pw-secret@internal.example:8443/v1/models?api_key=k-secret'
+        ));
+
+        try {
+            $this->client->listModels(AiProvider::OpenAICompatible, null, 'https://internal.example:8443/v1');
+            $this->fail('A failed listing should throw.');
+        } catch (\RuntimeException) {
+        }
+
+        Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message, array $context): bool => $message === 'Listing provider models failed'
+                && $context['exception'] === ConnectionException::class
+                && str_contains($context['error'], 'internal.example:8443')
+                && !str_contains(json_encode($context), 'pw-secret')
+                && !str_contains(json_encode($context), 'k-secret'),
         );
     }
 

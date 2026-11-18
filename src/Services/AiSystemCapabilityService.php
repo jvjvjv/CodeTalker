@@ -6,6 +6,7 @@ use Illuminate\Http\Client\HttpClientException;
 use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Models\AiSystem;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 
 class AiSystemCapabilityService
 {
@@ -107,7 +108,7 @@ class AiSystemCapabilityService
         } catch (HttpClientException $e) {
             Log::warning('Could not resolve LM Studio capabilities; keeping the stored ones.', [
                 'model' => $model,
-                'exception' => $e->getMessage(),
+                ...RedactedException::context($e),
             ]);
 
             return null;

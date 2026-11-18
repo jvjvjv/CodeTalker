@@ -61,7 +61,9 @@ class AiModelReadinessServiceTest extends TestCase
 
         $warning = collect($logged)->firstWhere('message', 'AI system readiness check failed');
         $this->assertNotNull($warning);
-        $this->assertInstanceOf(ConnectionException::class, $warning['context']['exception']);
-        $this->assertSame(self::TRANSPORT_MESSAGE, $warning['context']['exception']->getMessage());
+        // The log keeps what diagnoses the failure and masks the key.
+        $this->assertSame(ConnectionException::class, $warning['context']['exception']);
+        $this->assertStringContainsString('internal.example:8080', $warning['context']['error']);
+        $this->assertStringNotContainsString('sk-secret', json_encode($warning['context']));
     }
 }

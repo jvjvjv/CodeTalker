@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Models\AiSystem;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 
 /**
  * Lists the models available from a provider's API.
@@ -41,10 +42,11 @@ class ProviderModelsClient
             return $this->fetchModels($provider, $apiKey, $baseUrl);
         } catch (ConnectionException|RequestException $e) {
             // Both carry the request URL, and a 4xx body can echo the key
-            // back. The caller gets a fixed message; the detail is logged.
+            // back. The caller gets a fixed message; the log gets a redacted
+            // one.
             Log::warning('Listing provider models failed', [
                 'provider' => $provider->value,
-                'exception' => $e,
+                ...RedactedException::context($e),
             ]);
 
             $status = $e instanceof RequestException ? " (HTTP {$e->response->status()})" : '';
