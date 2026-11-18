@@ -148,10 +148,14 @@ class WebFetcher
     /**
      * {@see redactUrl()} applied to every URL inside a longer string, such as
      * a transport exception message.
+     *
+     * Userinfo runs to the *last* `@` in the authority, which is where cURL
+     * and parse_url() split it: an unencoded `@` in a password would
+     * otherwise leave the rest of the password in place as a fake username.
      */
     public static function redactText(string $text): string
     {
-        $text = preg_replace('#\b([a-z][a-z0-9+.\-]*://)[^/?\#@\s]*@#i', '$1', $text) ?? $text;
+        $text = preg_replace('#\b([a-z][a-z0-9+.\-]*://)[^/?\#\s]*@#i', '$1', $text) ?? $text;
 
         return preg_replace_callback(
             '/([?&])([^=&#\s]+)=([^&#\s]*)/',

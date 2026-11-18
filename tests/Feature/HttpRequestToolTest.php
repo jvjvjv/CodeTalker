@@ -959,6 +959,17 @@ class HttpRequestToolTest extends TestCase
         $this->assertSame('https://host.test/plain', WebFetcher::redactUrl('https://host.test/plain'));
     }
 
+    public function testRedactTextStripsUserinfoUpToTheLastAt(): void
+    {
+        // cURL and parse_url() split the authority at the last '@', so an
+        // unencoded '@' in a password must not leave its tail behind.
+        $this->assertSame(
+            'cURL error 7: Failed to connect for http://host.test:80/x?api_key=*** and https://other.test/',
+            WebFetcher::redactText('cURL error 7: Failed to connect for http://user:p@ss@host.test:80/x?api_key=k and https://a@b@other.test/'),
+        );
+        $this->assertSame('mail someone@example.com', WebFetcher::redactText('mail someone@example.com'));
+    }
+
     public function testRedactUrlMasksVendorSpellingsOfCredentialParameters(): void
     {
         $this->assertSame(

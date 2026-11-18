@@ -3,6 +3,8 @@
 namespace Jvjvjv\CodeTalker\Support;
 
 use GuzzleHttp\Exception\BadResponseException;
+use GuzzleHttp\Exception\TransferException;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
 use Jvjvjv\CodeTalker\Services\Web\WebFetcher;
 use Throwable;
@@ -13,10 +15,11 @@ use Throwable;
  * drops what should not reach a log.
  *
  * The throwable itself is never included: a logger writes its stack trace, and
- * the trace's arguments can hold the URL or the key. Userinfo and credential
- * query parameters are masked in the message. A response error is reduced to
- * its status, because its message quotes the response body, which can echo
- * the request's key back.
+ * the trace's arguments can hold the URL or the key. A transport failure's
+ * message is kept with userinfo and credential query parameters masked. A
+ * response error is reduced to its status, because its message quotes the
+ * response body, which can echo the request's key back. Anything else is
+ * reduced to its class.
  */
 final class RedactedException
 {
@@ -39,7 +42,12 @@ final class RedactedException
             return $context;
         }
 
-        $context['error'] = WebFetcher::redactText($e->getMessage());
+        // Only a transport failure's message is kept: it is cURL's text plus
+        // the URL, which redactText() knows how to mask. Any other exception's
+        // message could carry anything, so it is reduced to its class.
+        if ($e instanceof ConnectionException || $e instanceof TransferException) {
+            $context['error'] = WebFetcher::redactText($e->getMessage());
+        }
 
         return $context;
     }
