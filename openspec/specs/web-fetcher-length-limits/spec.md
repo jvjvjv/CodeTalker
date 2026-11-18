@@ -1,12 +1,12 @@
 # web-fetcher-length-limits Specification
 
 ## Purpose
-TBD - created by openspec-sync-specs from change configurable-webfetcher-length-limits. Update Purpose after archive.
+Makes the web fetcher's raw body and processed content length caps configurable, and keeps the limits the tool schemas advertise to the model in line with the configured values.
 
 ## Requirements
 
 ### Requirement: Configurable raw body length cap
-The system SHALL read the maximum number of bytes read off the wire before a response body is truncated from `config('code-talker.tools.web_fetcher.max_body_length')`, defaulting to 150000 when unset, instead of a hardcoded constant.
+The system SHALL read the maximum number of bytes read off the wire before a response body is truncated from `config('code-talker.tools.web_fetcher.max_body_length')`, defaulting to 150000 when unset, instead of a hardcoded constant. The cap SHALL be enforced while the body is received, so a response larger than the cap is cut off rather than fully downloaded and then trimmed.
 
 #### Scenario: Default body length cap applies when unconfigured
 - **WHEN** `CODE_TALKER_MAX_BODY_LENGTH` is not set in the host's environment
@@ -15,6 +15,11 @@ The system SHALL read the maximum number of bytes read off the wire before a res
 #### Scenario: Host-configured body length cap applies
 - **WHEN** the host sets `CODE_TALKER_MAX_BODY_LENGTH` to a different value
 - **THEN** `fetch-web-page` and `http-request` truncate the raw response body at that configured value instead of 150000
+
+#### Scenario: The cap bounds the download, not just the result
+- **WHEN** a server sends a body many times larger than the configured cap, compressed or not
+- **THEN** reading stops once the cap is reached
+- **AND** the memory used is proportional to the cap, not to the remote body
 
 ### Requirement: Configurable processed content length cap
 The system SHALL read the maximum number of characters of decoded/processed content returned (unless truncation is declined) from `config('code-talker.tools.web_fetcher.max_content_length')`, defaulting to 20000 when unset, instead of a hardcoded constant.

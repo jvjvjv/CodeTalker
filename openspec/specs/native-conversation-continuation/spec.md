@@ -1,8 +1,9 @@
 # native-conversation-continuation Specification
 
 ## Purpose
-TBD - created by syncing change adopt-laravel-ai-conversation-store. Update Purpose after archive.
+Backs laravel/ai's conversation store with the package's own conversation tables, so an agent can continue a stored conversation and replay its recorded turns, tool calls included, as history.
 ## Requirements
+
 ### Requirement: The package provides laravel/ai's conversation store
 
 The package SHALL implement `Laravel\Ai\Contracts\ConversationStore` over its own conversation tables and bind it over the framework default, so agents resolve conversation history from Code Talker's records.
@@ -51,7 +52,7 @@ The package's agent SHALL support resuming a stored conversation, so a host can 
 
 ### Requirement: Recorded turns are replayable
 
-Persisted assistant turns SHALL carry the structure needed to reconstruct them, so history replay does not silently lose tool activity.
+Persisted assistant turns SHALL carry the structure needed to reconstruct them, so history replay does not silently lose tool activity. When a recorded turn carries tool calls without a matching recorded result, replay SHALL omit those calls, so a turn cut short between tool results does not leave the conversation permanently rejected by the provider.
 
 #### Scenario: A turn using tools is recorded
 
@@ -62,3 +63,9 @@ Persisted assistant turns SHALL carry the structure needed to reconstruct them, 
 
 - **WHEN** a turn is cut short by a client disconnect or the maximum stream duration
 - **THEN** whatever it produced is still persisted, unchanged from previous behavior
+
+#### Scenario: A turn aborted between two tool results is replayed
+
+- **WHEN** a stored assistant turn carries two tool calls and only one tool result, and the conversation is continued
+- **THEN** the replayed history carries the matched call and its result only
+- **AND** the next turn is accepted by the provider
