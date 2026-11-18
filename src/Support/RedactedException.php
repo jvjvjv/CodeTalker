@@ -51,4 +51,21 @@ final class RedactedException
 
         return $context;
     }
+
+    /**
+     * Log context for a failure an operator has to debug, such as a failed
+     * turn: the message, location and trace are all kept, with credentials
+     * masked in every URL they contain.
+     *
+     * @return array{exception: class-string<Throwable>, error: string, at: string, trace: string}
+     */
+    public static function diagnostic(Throwable $e): array
+    {
+        return [
+            'exception' => $e::class,
+            'error' => WebFetcher::redactText($e->getMessage()),
+            'at' => $e->getFile() . ':' . $e->getLine(),
+            'trace' => WebFetcher::redactText($e->getTraceAsString()),
+        ];
+    }
 }

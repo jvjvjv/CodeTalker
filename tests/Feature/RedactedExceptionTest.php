@@ -40,4 +40,16 @@ class RedactedExceptionTest extends TestCase
             RedactedException::context(new \RuntimeException('token sk-anything for https://host.test/?q=1')),
         );
     }
+
+    public function test_a_diagnostic_keeps_message_location_and_trace_with_credentials_masked(): void
+    {
+        $e = new \RuntimeException('Failed for https://user:pw-secret@host.test/v1?api_key=k-secret');
+
+        $context = RedactedException::diagnostic($e);
+
+        $this->assertSame(\RuntimeException::class, $context['exception']);
+        $this->assertSame('Failed for https://host.test/v1?api_key=***', $context['error']);
+        $this->assertSame(__FILE__ . ':' . $e->getLine(), $context['at']);
+        $this->assertNotSame('', $context['trace']);
+    }
 }

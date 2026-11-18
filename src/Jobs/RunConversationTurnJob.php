@@ -13,6 +13,8 @@ use Jvjvjv\CodeTalker\Models\AiTurnRun;
 use Jvjvjv\CodeTalker\Services\AiPersonaConversationService;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnErrorMessage;
 use Jvjvjv\CodeTalker\Services\Conversation\TurnRunStore;
+use Jvjvjv\CodeTalker\Services\Web\WebFetcher;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 use Throwable;
 
 /**
@@ -100,13 +102,13 @@ class RunConversationTurnJob implements ShouldQueue
             $failure = $events->getReturn();
 
             if ($failure instanceof Throwable) {
-                $errorMessage = $failure->getMessage();
+                $errorMessage = WebFetcher::redactText($failure->getMessage());
             }
         } catch (Throwable $exception) {
             Log::error('Detached conversation turn failed', [
                 'ai_turn_run_id' => $run->id,
                 'ai_conversation_id' => $run->ai_conversation_id,
-                'exception' => $exception,
+                ...RedactedException::diagnostic($exception),
             ]);
 
             // A reader replays the run's stored events, so without this one it
@@ -120,7 +122,7 @@ class RunConversationTurnJob implements ShouldQueue
                 }
             }
 
-            $store->finish($run, AiTurnRunStatus::Failed, $exception->getMessage());
+            $store->finish($run, AiTurnRunStatus::Failed, WebFetcher::redactText($exception->getMessage()));
 
             throw $exception;
         }
@@ -154,7 +156,7 @@ class RunConversationTurnJob implements ShouldQueue
         app(TurnRunStore::class)->finish(
             $run,
             AiTurnRunStatus::Failed,
-            $exception?->getMessage(),
+            $exception === null ? null : WebFetcher::redactText($exception->getMessage()),
         );
     }
 }

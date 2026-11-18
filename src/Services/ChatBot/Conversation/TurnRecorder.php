@@ -8,6 +8,7 @@ use Jvjvjv\CodeTalker\Models\AiConversationMessage;
 use Jvjvjv\CodeTalker\Models\AiInteractionLog;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Services\ConversationUsageService;
+use Jvjvjv\CodeTalker\Services\Web\WebFetcher;
 use Throwable;
 
 /**
@@ -148,7 +149,7 @@ class TurnRecorder
             'ai_conversation_id' => $conversation->id,
             'direction' => 'request',
             'turn_number' => (string) $turnNumber,
-            'request_data' => $requestPayload + ['error' => $exception->getMessage(), 'error_reason' => 'provider_error'],
+            'request_data' => $requestPayload + ['error' => WebFetcher::redactText($exception->getMessage()), 'error_reason' => 'provider_error'],
             'created_at' => now(),
         ]);
 
@@ -161,7 +162,7 @@ class TurnRecorder
             'model' => $conversation->aiSystem->model,
             'duration_ms' => (int) ((microtime(true) - $startedAt) * 1000),
             'status' => AiInteractionStatus::Error,
-            'error_message' => $exception->getMessage(),
+            'error_message' => WebFetcher::redactText($exception->getMessage()),
         ]);
     }
 }

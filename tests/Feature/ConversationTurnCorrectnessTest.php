@@ -164,7 +164,7 @@ class ConversationTurnCorrectnessTest extends TestCase
                 StepContext $stepContext,
             ): Generator {
                 throw new RuntimeException(
-                    'cURL error 7: Failed to connect to 10.20.30.40 port 1234 for http://10.20.30.40:1234/v1/chat/completions'
+                    'cURL error 7: Failed to connect to 10.20.30.40 port 1234 for http://user:pw-secret@10.20.30.40:1234/v1/chat/completions'
                 );
             }
         });
@@ -182,12 +182,16 @@ class ConversationTurnCorrectnessTest extends TestCase
         $this->assertStringNotContainsString('10.20.30.40', implode('', $lines));
         $this->assertStringNotContainsString('[DONE]', end($lines));
 
-        // The detail is kept where an operator looks for it.
+        // The detail is kept where an operator looks for it, with the URL's
+        // credentials masked.
         $this->assertStringContainsString('10.20.30.40', AiInteractionLog::first()->error_message);
+        $this->assertStringNotContainsString('pw-secret', AiInteractionLog::first()->error_message);
 
         Log::shouldHaveReceived('error')->withArgs(
-            fn (string $message, array $context): bool => ($context['exception'] ?? null) instanceof RuntimeException
-                && str_contains($context['exception']->getMessage(), 'http://10.20.30.40:1234'),
+            fn (string $message, array $context): bool => $message === 'Conversation turn failed'
+                && ($context['exception'] ?? null) === RuntimeException::class
+                && str_contains($context['error'], 'http://10.20.30.40:1234')
+                && !str_contains(json_encode($context), 'pw-secret'),
         );
     }
 

@@ -5,6 +5,7 @@ namespace Jvjvjv\CodeTalker\Services;
 use Generator;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 use RuntimeException;
 use Throwable;
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
@@ -296,7 +297,7 @@ class AiPersonaConversationService
                 'ai_persona_id' => $conversation->ai_persona_id,
                 'ai_system_id' => $conversation->ai_system_id,
                 'turn_number' => $turnNumber,
-                'exception' => $exception,
+                ...RedactedException::diagnostic($exception),
             ]);
 
             yield TurnErrorMessage::event(TurnErrorMessage::PROVIDER_ERROR);

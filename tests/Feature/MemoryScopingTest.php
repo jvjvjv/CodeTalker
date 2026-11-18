@@ -131,6 +131,25 @@ class MemoryScopingTest extends TestCase
         $this->assertSame('Something learned', $memory->content);
     }
 
+    public function test_a_failed_analysis_is_logged_with_url_credentials_masked(): void
+    {
+        \Illuminate\Support\Facades\Log::spy();
+        Http::fake(fn () => throw new \Illuminate\Http\Client\ConnectionException(
+            'cURL error 7: Failed to connect for http://user:pw-secret@localhost:1234/v1/chat/completions?api_key=k-secret'
+        ));
+
+        $conversation = $this->makeConversation(['visitor_email' => 'visitor@example.com']);
+
+        $this->service()->processCompletedConversation($conversation, null, 'visitor@example.com');
+
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('error')->withArgs(
+            fn (string $message, array $context): bool => $message === 'AI Memory processing failed'
+                && str_contains(json_encode($context), 'localhost:1234')
+                && !str_contains(json_encode($context), 'pw-secret')
+                && !str_contains(json_encode($context), 'k-secret'),
+        );
+    }
+
     // ------------------------------------------------------ operator runs
 
     private function makeOperator(): AiOperator

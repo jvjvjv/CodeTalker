@@ -286,8 +286,8 @@ class RunConversationTurnJobTest extends TestCase
         $this->assertStringNotContainsString('10.0.0.5', json_encode($run->events()->pluck('payload')->all()));
 
         Log::shouldHaveReceived('error')->withArgs(
-            fn (string $message, array $context): bool => ($context['exception'] ?? null) instanceof \RuntimeException
-                && str_contains($context['exception']->getMessage(), '10.0.0.5'),
+            fn (string $message, array $context): bool => ($context['exception'] ?? null) === \RuntimeException::class
+                && str_contains($context['error'], '10.0.0.5'),
         );
     }
 

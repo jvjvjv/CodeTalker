@@ -10,6 +10,7 @@ use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeFrame;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 
 class AiMemoryService
 {
@@ -224,7 +225,7 @@ class AiMemoryService
                 'feature' => $conversation->feature,
                 'user_id' => $userId,
                 'visitor_email' => $visitorEmail,
-                'error' => $e->getMessage(),
+                ...RedactedException::diagnostic($e),
             ]);
         }
     }

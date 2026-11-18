@@ -4,6 +4,7 @@ namespace Jvjvjv\CodeTalker\Services\Mcp\Remote;
 
 use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Models\AiMcpServerTool;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 use Laravel\Mcp\Client\Schema\ToolResult;
 use Laravel\Mcp\Exceptions\JsonRpcException;
 use RuntimeException;
@@ -107,8 +108,7 @@ class RemoteToolHandler
             Log::warning('code-talker: remote MCP tool call failed', [
                 'server' => $server->slug,
                 'tool' => $this->tool->remote_name,
-                'exception' => $e::class,
-                'message' => $e->getMessage(),
+                ...RedactedException::diagnostic($e),
             ]);
 
             return ['error' => "Remote tool {$this->name()} is unavailable: server {$server->slug} did not return a usable result."];

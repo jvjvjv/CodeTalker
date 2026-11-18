@@ -66,4 +66,44 @@ class AiModelReadinessServiceTest extends TestCase
         $this->assertStringContainsString('internal.example:8080', $warning['context']['error']);
         $this->assertStringNotContainsString('sk-secret', json_encode($warning['context']));
     }
+
+    public function test_a_failed_warmup_reports_a_fixed_message_and_logs_the_detail_masked(): void
+    {
+        \Illuminate\Support\Facades\Http::fake(fn () => throw new ConnectionException(
+            'cURL error 7: Failed to connect for http://user:pw-secret@local.test:1234/v1/x?api_key=k-secret'
+        ));
+
+        $logged = [];
+        Log::listen(function ($event) use (&$logged): void {
+            $logged[] = ['message' => $event->message, 'context' => $event->context];
+        });
+
+        $readiness = $this->app->make(\Jvjvjv\CodeTalker\Services\AiModelReadinessService::class);
+
+        foreach (['lm-studio' => 'Model load failed.', 'openai-compatible' => 'Warmup failed.'] as $provider => $expected) {
+            $system = AiSystem::create([
+                'name' => "Local {$provider}",
+                'provider' => $provider,
+                'api_key' => 'local-key',
+                'model' => 'qwen3',
+                'base_url' => 'http://local.test:1234/v1',
+                'max_tokens' => 1024,
+                'is_active' => true,
+            ]);
+
+            $status = $readiness->warmUpSystem($system);
+
+            $this->assertSame('unavailable', $status['state'], $provider);
+            $this->assertSame($expected, $status['message'], $provider);
+            $this->assertTrue($status['warmup_attempted'], $provider);
+        }
+
+        $warmupLogs = collect($logged)->whereIn('message', ['AI system model load failed', 'AI system warmup failed']);
+        $this->assertCount(2, $warmupLogs);
+
+        $encoded = json_encode($warmupLogs->all());
+        $this->assertStringContainsString('local.test:1234', $encoded);
+        $this->assertStringNotContainsString('pw-secret', $encoded);
+        $this->assertStringNotContainsString('k-secret', $encoded);
+    }
 }

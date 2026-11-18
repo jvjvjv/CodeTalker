@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Events\RemoteMcpToolDefinitionChanged;
 use Jvjvjv\CodeTalker\Models\AiMcpServer;
 use Jvjvjv\CodeTalker\Models\AiMcpServerTool;
+use Jvjvjv\CodeTalker\Services\Web\WebFetcher;
 use Laravel\Mcp\Client\Primitives\Tool as RemoteTool;
 use Throwable;
 
@@ -49,7 +50,8 @@ class RemoteToolCatalogSync
             // tool bound is also the page bound.
             $remoteTools = BoundedToolListing::fetchFrom($client, $maxTools, $maxTools)->values()->all();
         } catch (Throwable $e) {
-            return $this->failed($server, $e->getMessage());
+            // Stored and shown to admins; the server URL can carry a token.
+            return $this->failed($server, WebFetcher::redactText($e->getMessage()));
         } finally {
             try {
                 $client?->disconnect();

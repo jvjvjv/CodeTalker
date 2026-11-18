@@ -310,6 +310,35 @@ class RemoteMcpToolsTest extends TestCase
         $this->assertNotNull($server->fresh()->last_sync_error);
     }
 
+    public function test_a_recorded_sync_failure_has_url_credentials_masked(): void
+    {
+        $server = $this->syncedServer(['search']);
+
+        $this->fake->down('cURL error 7: Failed to connect for https://user:pw-secret@mdn.test/mcp?token=t-secret');
+
+        $this->sync($server);
+
+        $error = (string) $server->fresh()->last_sync_error;
+        $this->assertStringNotContainsString('pw-secret', $error);
+        $this->assertStringNotContainsString('t-secret', $error);
+    }
+
+    public function test_a_failed_remote_call_is_logged_with_url_credentials_masked(): void
+    {
+        $this->syncedServer(['search']);
+        \Illuminate\Support\Facades\Log::spy();
+
+        $this->fake->down('cURL error 7: Failed to connect for https://user:pw-secret@mdn.test/mcp?token=t-secret');
+
+        $this->registry(['mdn__search'])->dispatch('mdn__search', ['q' => 'x']);
+
+        \Illuminate\Support\Facades\Log::shouldHaveReceived('warning')->withArgs(
+            fn (string $message, array $context): bool => $message === 'code-talker: remote MCP tool call failed'
+                && !str_contains(json_encode($context), 'pw-secret')
+                && !str_contains(json_encode($context), 't-secret'),
+        );
+    }
+
     public function test_a_failure_midway_through_paging_keeps_the_previous_catalog(): void
     {
         $server = $this->syncedServer(['search']);
