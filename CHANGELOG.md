@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.20.0] — 2026-11-18
+
+Adds the migration a fresh install needs to open a conversation, and tightens error reporting, memory scoping, the web tools, remote MCP syncing and management validation.
+
+### Breaking Changes
+- Two new migrations ship with this release: `ai_conversations.uuid` is added and filled for existing rows, which also clears `visitor_email` on memories that belong to a user, and the seeded system-prompt id sequence is advanced on Postgres. Re-publish migrations and run them.
+- A terminal `error` event's `message` is now a fixed string for its `reason`, never the provider's or the exception's text. The detail is logged and kept on `AiInteractionLog` and `AiTurnRun.error_message`.
+- `reason` gains `persona_unavailable` and `system_unavailable`: `continueConversation()` ends the turn with a terminal `error` when the persona has been deactivated or its system deleted, where it previously threw. Handle both in exhaustive matches.
+- `x-api-key`, `api-key`, `x-auth-token`, `x-access-token`, `x-goog-api-key`, `x-amz-security-token` and `x-session-token` are now credential headers, under the same rules as `Authorization`. A redirect to a different origin (scheme, host or port) carries only a fixed set of benign headers.
+- Credentials configured on an `AiSystem` attach only to `https` URLs and loopback addresses. An endpoint that needs them over plain `http` must move to `https`.
+- `http-request` and `fetch-web-page` refuse a URL carrying a username or password, and refuse `100.64.0.0/10`, `192.0.0.0/24`, `198.18.0.0/15`, `224.0.0.0/4`, `64:ff9b::/96`, `2002::/16` and `fec0::/10` unless the policy allows private hosts.
+- On the external MCP transport, `request_policy.allow_private_hosts: true` is refused. Private hosts are reachable only from a conversation.
+- `AiMcpServerManager::update()` keeps the stored `auth` when it is submitted as `null`, an empty string or a JSON `null`. To remove a server's auth, send `{"type":"none"}`.
+- `AiMemoryManager::create()` requires exactly one of `user_id` and `visitor_email`. A memory written for a user stores no visitor email, and a visitor email never matches a user's memories.
+- A conversation with neither a user nor a visitor email, and every operator run, is no longer analysed for memories.
+- `startConversation()` trims the visitor name and email and strips control characters from them, and throws `InvalidArgumentException` naming the field when one is longer than 255 characters or the email is malformed.
+- `AiSystemManager`, `AiPersonaManager` and `AiOperatorManager` validate more strictly: `config`, `pricing_profile` and `config.provider_options` must be JSON objects, `openai-compatible` requires `base_url` on create, `temperature` accepts 0 to 2, and a persona's or operator's system must be active, not deleted and chat-role. Check stored records before their next save.
+
+### New Features
+- `AiSystemManager::update()` accepts a new `api_key`, so a system's key can be rotated. A blank one keeps the stored key.
+- `http-request` returns the decoded body of a 4xx or 5xx response alongside its status.
+- Added `remote_mcp.max_tools` (default 500) and `remote_mcp.max_result_bytes` (default 100 000). A sync stops at the tool limit and keeps the previous catalog, and a longer tool result is cut to the byte limit with a note.
+
+### Bug Fixes
+- `startConversation()` no longer fails on a fresh install for lack of the `ai_conversations.uuid` column.
+- The first `AiSystemPrompt::create()` on Postgres no longer collides with the seeded prompt's id.
+- Memories injected into the system prompt are selected by the conversation's user or visitor email, not by the user signed in to the current request.
+- Deleting an `AiSystem` also deactivates its operators and removes its feature-default claims, in one transaction, so a feature no longer points at a deleted system.
+- Readiness statuses and `search-web` engine failures report a fixed message and log the detail. Gemini model listing sends the key in a header, and URLs written to logs have credentials masked.
+- A failed raw-exchange insert logs the exception class and code, not the data being written.
+- `max_body_length` is enforced while a response downloads, measured after decompression.
+- A malformed header line passed to `http-request` is dropped and reported in `stripped_headers` instead of ending the turn.
+- The `GET` that a 301, 302 or 303 redirect produces is no longer refused by a policy that allows only other methods.
+- `RemoteToolCatalogSync::sync()` no longer throws when writing the catalog fails; it records `last_sync_error` and keeps the previous catalog.
+- A remote tool name that passes to a different remote tool is reassigned without a sync error and announced with `RemoteMcpToolDefinitionChanged`. A remote name longer than 255 characters marks the tool unrepresentable, and a long title is truncated.
+- An oversized or deeply nested remote input schema marks the tool unrepresentable instead of stalling the turn, and each schema is converted once per registry build.
+- A server that rejects the `initialize` handshake is not called again in the same turn, and an empty `structuredContent` no longer hides a result's text.
+- `mcp.web.middleware` falls back to `['auth:sanctum']` when a cached config has no such key.
+- Discovered tools receive the conversation's `ToolContext` in any constructor parameter of that type, whatever its name.
+- Continuing a `Completed` conversation re-activates it.
+- Replayed history drops a tool call whose result was never recorded, so a turn interrupted between tool results no longer breaks every later turn.
+- A continuation after a `length` stop sends only that attempt's text, not every earlier attempt's again.
+- Turn numbers above 9 are ordered numerically.
+- `ai:complete-idle-conversations` completes every idle conversation in a large backlog, and treats a negative `idle_timeout_minutes` as 0.
+- LM Studio capability hydration sends the system's API key, and a save succeeds while the server is unreachable, keeping the stored capabilities.
+- `scan-memories` ignores a non-string `topics` entry instead of failing.
+- The stream client stops at once when handed an already-aborted `AbortSignal`, and removes its abort listener when the turn ends.
+
+### Known Issues
+- A visitor email is whatever the visitor typed, and is not verified. Where visitor-scoped memories should stay private, require authentication.
+- The remote MCP timeout bounds each HTTP request, not a whole call. A first call on a cold session makes several requests, so a slow server can hold a turn for several multiples of the timeout.
+
 ## [0.19.0] — 2026-10-24
 
 `AiSystem` records now set a graded thinking level instead of switching thinking on or off, and each provider receives the reasoning request its model accepts.
