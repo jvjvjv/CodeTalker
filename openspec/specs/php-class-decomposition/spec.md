@@ -1,7 +1,7 @@
 # php-class-decomposition Specification
 
 ## Purpose
-TBD - created by archiving change refactor-large-php-classes. Update Purpose after archive.
+Governs splitting the package's largest PHP classes into smaller collaborators: extracted classes sit beside the class they came from, and public surfaces, wire formats, props, session semantics, tool output, discovery and persistence behave exactly as before.
 ## Requirements
 ### Requirement: Extracted collaborators live beside the class they came from
 

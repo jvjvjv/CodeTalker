@@ -3,7 +3,11 @@
 namespace Jvjvjv\CodeTalker\Services;
 
 use Generator;
+use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 use RuntimeException;
+use Throwable;
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
 use Jvjvjv\CodeTalker\Jobs\RunConversationTurnJob;
 use Jvjvjv\CodeTalker\Models\AiPersona;
@@ -18,6 +22,7 @@ use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\RequestPayloadBuilder;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\ResponseBlocks;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\SystemPromptBuilder;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\ConversationHistory;
+use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnErrorMessage;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnGuards;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnRecorder;
 use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnRequestPayload;
@@ -27,6 +32,7 @@ use Jvjvjv\CodeTalker\Services\LaravelAi\AiSystemProviderConfigurator;
 use Jvjvjv\CodeTalker\Services\LaravelAi\StreamTranslator;
 use Jvjvjv\CodeTalker\Services\Mcp\ChatBotToolRegistry;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeContext;
+use Jvjvjv\CodeTalker\Support\VisitorIdentity;
 
 class AiPersonaConversationService
 {
@@ -82,13 +88,24 @@ class AiPersonaConversationService
      * an inactive persona is not chattable, and a persona that requires visitor
      * identity has no way to attribute a conversation without one.
      *
+     * The visitor name and email are typed by the visitor and interpolated into
+     * the system prompt, so they are cleaned to a single line first (see
+     * VisitorIdentity), and memories are chosen by the identity given here
+     * rather than by whoever the session is authenticated as.
+     *
      * @throws RuntimeException if the persona is inactive or required identity is missing
+     * @throws InvalidArgumentException if a visitor field is too long or the email is malformed
      */
     public function startConversation(AiPersona $persona, mixed $user = null, ?string $visitorName = null, ?string $visitorEmail = null): AiConversation
     {
         if (! $persona->is_active) {
             throw new RuntimeException("The persona '{$persona->slug}' is not active.");
         }
+
+        $visitor = VisitorIdentity::sanitise($visitorName, $visitorEmail);
+        $visitorName = $visitor->name;
+        $visitorEmail = $visitor->email;
+        $userId = $user?->getKey();
 
         if ($persona->require_visitor_identity && (blank($visitorName) || blank($visitorEmail))) {
             throw new RuntimeException(
@@ -97,7 +114,7 @@ class AiPersonaConversationService
         }
 
         $conversation = AiConversation::create([
-            'user_id' => $user?->id,
+            'user_id' => $userId,
             'ai_system_id' => $persona->ai_system_id,
             'ai_persona_id' => $persona->id,
             'feature' => $persona->featureKey(),
@@ -114,7 +131,7 @@ class AiPersonaConversationService
         AiConversationMessage::create([
             'ai_conversation_id' => $conversation->id,
             'role' => 'system',
-            'content' => $this->systemPrompts->build($persona, null, $visitorName, $visitorEmail),
+            'content' => $this->systemPrompts->build($persona, $visitorName, $visitorEmail, $userId),
         ]);
 
         return $conversation;
@@ -132,16 +149,46 @@ class AiPersonaConversationService
      * laravel/ai owns the provider call and the tool loop; this method owns
      * persistence and logging.
      *
-     * @return Generator<int, array<string, mixed>>
+     * A failure ends the stream with an `error` event whose `message` is fixed
+     * text for its `reason` (see TurnErrorMessage) — never the exception's own
+     * text, which can name the provider's host or quote its response. The
+     * generator's return value is the exception that failed the turn, if any,
+     * for a caller that records it server-side.
+     *
+     * @return Generator<int, array<string, mixed>, mixed, Throwable|null>
      */
     public function continueConversation(AiConversation $conversation, string $userMessage): Generator
     {
-        $conversation->loadMissing(['aiSystem', 'aiPersona', 'messages']);
+        // The persona and system are reloaded even when the caller preloaded
+        // them: the availability check below must see whether they are still
+        // usable now, not when the caller fetched them. The model itself is
+        // not refreshed, which would discard attributes the caller has set
+        // but not saved.
+        $conversation->load(['aiSystem', 'aiPersona'])->loadMissing('messages');
 
         // The controller used to do this on every message. It is not just a
         // header value — it migrates a stale hash — so it moves here rather
         // than becoming the host's job to remember.
         $conversation->generateChatHash();
+
+        // Checked before anything is written or the try block is entered: the
+        // persona may have been deactivated, or the system deleted, since the
+        // conversation opened, and recordFailure() cannot record a turn
+        // against a system that is not there.
+        $unavailable = $this->unavailableReason($conversation);
+
+        if ($unavailable !== null) {
+            yield TurnErrorMessage::event($unavailable);
+
+            return null;
+        }
+
+        // The idle sweep may have completed this conversation. Continuing it
+        // makes it live again, so it is swept — and its memories analysed —
+        // once more when it next goes quiet.
+        if ($conversation->status === AiConversationStatus::Completed) {
+            $conversation->forceFill(['status' => AiConversationStatus::Active])->save();
+        }
 
         // Read history before persisting the incoming message: that message
         // becomes the prompt, so replaying it as history too would send it twice.
@@ -220,19 +267,18 @@ class AiPersonaConversationService
             if ($outcome->maxDurationExceeded) {
                 // Still surfaced to the browser as a failure — the guard genuinely
                 // cut the turn off — but the content above is no longer lost.
-                yield [
-                    'type' => 'error',
-                    'message' => $outcome->maxDurationMessage,
-                    'reason' => 'max_stream_duration',
-                ];
+                // The interaction log keeps the detailed message.
+                yield TurnErrorMessage::event(TurnErrorMessage::MAX_STREAM_DURATION);
 
-                return;
+                return null;
             }
 
             foreach ($translator->finish() as $browserEvent) {
                 yield $browserEvent;
             }
-        } catch (\Throwable $exception) {
+
+            return null;
+        } catch (Throwable $exception) {
             // The max-stream-duration guard no longer throws (it stops the
             // turn like a client abort so partial content is preserved, see
             // above), so anything reaching this catch is a genuine provider
@@ -246,12 +292,38 @@ class AiPersonaConversationService
                 $startTime,
             );
 
-            yield [
-                'type' => 'error',
-                'message' => $exception->getMessage(),
-                'reason' => 'provider_error',
-            ];
+            Log::error('Conversation turn failed', [
+                'conversation_id' => $conversation->id,
+                'ai_persona_id' => $conversation->ai_persona_id,
+                'ai_system_id' => $conversation->ai_system_id,
+                'turn_number' => $turnNumber,
+                ...RedactedException::diagnostic($exception),
+            ]);
+
+            yield TurnErrorMessage::event(TurnErrorMessage::PROVIDER_ERROR);
+
+            return $exception;
         }
+    }
+
+    /**
+     * Why a conversation cannot take another turn, or null when it can.
+     *
+     * A conversation with no persona at all (one a host created directly) is
+     * not refused here; only a persona that is gone or switched off is.
+     */
+    private function unavailableReason(AiConversation $conversation): ?string
+    {
+        if ($conversation->ai_persona_id !== null
+            && ($conversation->aiPersona === null || ! $conversation->aiPersona->is_active)) {
+            return TurnErrorMessage::PERSONA_UNAVAILABLE;
+        }
+
+        if ($conversation->aiSystem === null) {
+            return TurnErrorMessage::SYSTEM_UNAVAILABLE;
+        }
+
+        return null;
     }
 
     /**

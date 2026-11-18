@@ -3,8 +3,8 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Enums\AiTurnRunStatus;
 use Jvjvjv\CodeTalker\Jobs\RunConversationTurnJob;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
@@ -12,6 +12,7 @@ use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Models\AiTurnRun;
 use Jvjvjv\CodeTalker\Services\AiPersonaConversationService;
+use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnErrorMessage;
 use Jvjvjv\CodeTalker\Services\Conversation\TurnRunStore;
 use Jvjvjv\CodeTalker\Services\LaravelAi\CodeTalkerAgent;
 use Jvjvjv\CodeTalker\Services\LaravelAi\Streaming\Heartbeat;
@@ -39,17 +40,6 @@ class RunConversationTurnJobTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     private function persona(): AiPersona
@@ -243,6 +233,62 @@ class RunConversationTurnJobTest extends TestCase
         // The terminal error event itself is stored, so a reader replaying the
         // run sees the same failure the run's status reports.
         $this->assertContains('error', $run->events()->get()->pluck('payload.type')->all());
+
+        // ...but with fixed text. The provider's message stays on the run row,
+        // which a reader never receives.
+        $error = $run->events()->get()->pluck('payload')->firstWhere('type', 'error');
+        $this->assertSame(TurnErrorMessage::for('provider_error'), $error['message']);
+        $this->assertStringNotContainsString('Context size', $error['message']);
+    }
+
+    /**
+     * An exception escaping the turn would otherwise leave a reader replaying
+     * the run with no terminal event at all.
+     */
+    public function test_an_exception_escaping_the_turn_stores_a_fixed_error_event(): void
+    {
+        Queue::fake();
+        Log::spy();
+
+        $service = $this->app->make(AiPersonaConversationService::class);
+        $conversation = $service->startConversation($this->persona());
+        $run = $this->app->make(TurnRunStore::class)->open($conversation, 'Hi');
+
+        $throwing = new class(
+            $this->app->make(\Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory::class),
+            $this->app->make(\Jvjvjv\CodeTalker\Services\AiMemoryService::class),
+            $this->app->make(\Jvjvjv\CodeTalker\Services\ConversationUsageService::class),
+            $this->app->make(\Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeContext::class),
+            $this->app->make(\Jvjvjv\CodeTalker\Services\LaravelAi\AiSystemProviderConfigurator::class),
+        ) extends AiPersonaConversationService {
+            public function continueConversation(\Jvjvjv\CodeTalker\Models\AiConversation $conversation, string $userMessage): Generator
+            {
+                yield ['type' => 'status', 'phase' => 'model_loading', 'message' => 'Waiting for model response...'];
+
+                throw new \RuntimeException('cURL error 7: Failed to connect to 10.0.0.5 port 1234');
+            }
+        };
+
+        try {
+            $this->app->make(RunConversationTurnJob::class, ['turnRunId' => $run->id])
+                ->handle($throwing, $this->app->make(TurnRunStore::class));
+            $this->fail('The exception should be rethrown for the queue.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('10.0.0.5', $exception->getMessage());
+        }
+
+        $run->refresh();
+        $this->assertSame(AiTurnRunStatus::Failed, $run->status);
+
+        $error = $run->events()->get()->pluck('payload')->firstWhere('type', 'error');
+        $this->assertNotNull($error);
+        $this->assertSame(TurnErrorMessage::for('provider_error'), $error['message']);
+        $this->assertStringNotContainsString('10.0.0.5', json_encode($run->events()->pluck('payload')->all()));
+
+        Log::shouldHaveReceived('error')->withArgs(
+            fn (string $message, array $context): bool => ($context['exception'] ?? null) === \RuntimeException::class
+                && str_contains($context['error'], '10.0.0.5'),
+        );
     }
 
     public function test_a_failed_job_marks_the_run_failed_so_a_reader_stops_waiting(): void

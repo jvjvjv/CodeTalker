@@ -1,8 +1,9 @@
 # frontend-integration-contract Specification
 
 ## Purpose
-TBD - created by archiving change frontend-integration-contract. Update Purpose after archive.
+Defines what a host's frontend can rely on without the package shipping any UI: the documented props and stream event vocabulary, publishable TypeScript declarations, and a dependency-free stream client, kept in sync and typechecked.
 ## Requirements
+
 ### Requirement: The Inertia prop contract is documented and versioned
 
 The README SHALL document every prop the package passes to each chat page, and SHALL state that these props follow the package's semantic version — a rename, removal, or type change is a breaking change.
@@ -58,7 +59,7 @@ The package SHALL ship TypeScript declarations for both contracts, publishable i
 
 ### Requirement: A framework-agnostic stream client is publishable
 
-The package SHALL ship a dependency-free TypeScript client that consumes the chat message endpoint and reports progress through typed callbacks, publishable into a host app and owned by it thereafter.
+The package SHALL ship a dependency-free TypeScript client that consumes the chat message endpoint and reports progress through typed callbacks, publishable into a host app and owned by it thereafter. It SHALL honour an `AbortSignal` that is already aborted when passed, and SHALL release any listener it attached to a caller's signal once the turn ends.
 
 #### Scenario: Publishing and using the client
 
@@ -88,6 +89,16 @@ The package SHALL ship a dependency-free TypeScript client that consumes the cha
 - **WHEN** the stream carries a `tool_use_progress` or `page_reload` frame
 - **THEN** the client invokes `onToolProgress` or `onPageReload` respectively, rather than falling through to the unrecognized-type fallback
 
+#### Scenario: A signal aborted before the call
+
+- **WHEN** the caller passes an `AbortSignal` that is already aborted
+- **THEN** no request is sent and the returned promise settles as an abort
+
+#### Scenario: A long-lived signal is reused across turns
+
+- **WHEN** the caller passes the same `AbortSignal` to many sequential turns that each finish normally
+- **THEN** the signal accumulates no listeners from finished turns
+
 ### Requirement: Rendered component names are configurable
 
 The Inertia component each chat page renders SHALL be read from configuration, so a host can point the package at its own component paths without subclassing a controller.
@@ -116,4 +127,3 @@ The package's TypeScript SHALL be verified in CI rather than assumed correct, wi
 
 - **WHEN** a host app installs the package via Composer
 - **THEN** no Node dependency, build step, or `package.json` merge is required of them
-

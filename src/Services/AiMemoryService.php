@@ -10,6 +10,7 @@ use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeFrame;
 use Jvjvjv\CodeTalker\Services\RawExchange\RawExchangeRecorder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 
 class AiMemoryService
 {
@@ -25,8 +26,8 @@ class AiMemoryService
      *
      * Memories are scoped by user identity:
      * - For logged-in users (user_id): memories tied to that user across all their conversations with the chatbot
-     * - For visitors (email): memories tied to their email address
-     * This allows each individual user to have persistent chatbot memories while keeping different users' data separate.
+     * - For visitors (email): memories tied to their email address and to no user
+     * A user id wins when both are given. This allows each individual user to have persistent chatbot memories while keeping different users' data separate.
      *
      * @param string $feature The feature key (e.g., 'persona:resume-assistant')
      * @param string|int|null $userId User ID if logged in, null for visitors (supports both UUID and integer IDs)
@@ -34,23 +35,18 @@ class AiMemoryService
      */
     public function getMemoriesForPrompt(string $feature, string|int|null $userId = null, ?string $email = null): string
     {
-        $query = AiFeatureMemory::query()
-            ->forFeature($feature)
-            ->active();
-
-        // Scope memories to the current user (by ID or email)
-        if ($userId !== null) {
-            $query->where('user_id', $userId);
-        } elseif ($email !== null) {
-            $query->where('visitor_email', $email);
-        } else {
-            // No user identity - return no memories (or we could fallback to all memories for backward compatibility)
+        // No identity, no memories.
+        if (!AiFeatureMemory::hasIdentity($userId, $email)) {
             return '';
         }
 
-        $memories = $query->orderByDesc('confidence')
-                          ->orderByDesc('times_reinforced')
-                          ->get();
+        $memories = AiFeatureMemory::query()
+            ->forFeature($feature)
+            ->forIdentity($userId, $email)
+            ->active()
+            ->orderByDesc('confidence')
+            ->orderByDesc('times_reinforced')
+            ->get();
 
         if ($memories->isEmpty()) {
             return '';
@@ -78,6 +74,8 @@ class AiMemoryService
      * Analyze a completed conversation and extract memory operations.
      * Memories are scoped to the current user (by ID or email).
      *
+     * @throws \InvalidArgumentException when neither identity is given
+     *
      * @return array{add: array<int, mixed>, update: array<int, mixed>, remove: array<int, mixed>}
      */
     public function analyzeConversation(AiConversation $conversation, string|int|null $userId = null, ?string $visitorEmail = null): array
@@ -85,17 +83,11 @@ class AiMemoryService
         $conversation->loadMissing(['messages', 'aiSystem']);
 
         // Scope existing memories to the current user
-        $existingMemoriesQuery = AiFeatureMemory::query()
+        $existingMemories = AiFeatureMemory::query()
             ->forFeature($conversation->feature)
-            ->active();
-
-        if ($userId !== null) {
-            $existingMemoriesQuery->where('user_id', $userId);
-        } elseif ($visitorEmail !== null) {
-            $existingMemoriesQuery->where('visitor_email', $visitorEmail);
-        }
-
-        $existingMemories = $existingMemoriesQuery->get(['key', 'category', 'content', 'confidence'])
+            ->forIdentity($userId, $visitorEmail)
+            ->active()
+            ->get(['key', 'category', 'content', 'confidence'])
             ->toArray();
 
         $conversationMessages = $conversation->messages
@@ -133,9 +125,23 @@ class AiMemoryService
     /**
      * Apply memory operations (add/update/remove) from an analysis result.
      * Memories are scoped to the user who owns them, identified by either user_id or visitor_email.
+     * A memory belongs to exactly one identity: when a user id is given, the visitor email is not stored.
+     *
+     * @throws \InvalidArgumentException when neither identity is given — an unscoped
+     *                                   remove would deactivate every memory for the feature
      */
     public function applyMemoryOperations(string $feature, array $operations, int $conversationId, string|int|null $userId = null, ?string $visitorEmail = null): void
     {
+        if (!AiFeatureMemory::hasIdentity($userId, $visitorEmail)) {
+            throw new \InvalidArgumentException('Memory operations require a user id or a visitor email.');
+        }
+
+        if ($userId === '') {
+            $userId = null;
+        }
+
+        $visitorEmail = $userId !== null ? null : $visitorEmail;
+
         DB::transaction(function () use ($feature, $operations, $conversationId, $userId, $visitorEmail) {
             foreach ($operations['add'] ?? [] as $entry) {
                 AiFeatureMemory::create([
@@ -153,18 +159,12 @@ class AiMemoryService
 
             foreach ($operations['update'] ?? [] as $entry) {
                 // When updating memories, scope to the current user (by ID or email)
-                $updateQuery = AiFeatureMemory::query()
+                $memory = AiFeatureMemory::query()
                     ->forFeature($feature)
+                    ->forIdentity($userId, $visitorEmail)
                     ->where('key', $entry['key'] ?? '')
-                    ->active();
-
-                if ($userId !== null) {
-                    $updateQuery->where('user_id', $userId);
-                } elseif ($visitorEmail !== null) {
-                    $updateQuery->where('visitor_email', $visitorEmail);
-                }
-
-                $memory = $updateQuery->first();
+                    ->active()
+                    ->first();
 
                 if ($memory === null) {
                     continue;
@@ -189,19 +189,12 @@ class AiMemoryService
             }
 
             // When removing memories, also scope to the current user
-            $removeQuery = AiFeatureMemory::query()
-                ->forFeature($feature)
-                ->active();
-
-            if ($userId !== null) {
-                $removeQuery->where('user_id', $userId);
-            } elseif ($visitorEmail !== null) {
-                $removeQuery->where('visitor_email', $visitorEmail);
-            }
-
             foreach ($operations['remove'] ?? [] as $entry) {
-                $removeQuery
-                    ->where('key', $entry['key'])
+                AiFeatureMemory::query()
+                    ->forFeature($feature)
+                    ->forIdentity($userId, $visitorEmail)
+                    ->active()
+                    ->where('key', $entry['key'] ?? '')
                     ->update(['is_active' => false]);
             }
         });
@@ -213,6 +206,16 @@ class AiMemoryService
      */
     public function processCompletedConversation(AiConversation $conversation, string|int|null $userId = null, ?string $visitorEmail = null): void
     {
+        // An anonymous conversation has no one to remember things about, and
+        // its operations could only be applied unscoped. An operator run is
+        // machine work, not a person's conversation, even when it carries the
+        // id of the user it ran for. Both are skipped before the provider call,
+        // here and not only in the observer: rebuildMemories() and a directly
+        // dispatched ProcessAiMemoryJob reach this method without it.
+        if (!AiFeatureMemory::hasIdentity($userId, $visitorEmail) || $conversation->ai_operator_id !== null) {
+            return;
+        }
+
         try {
             $operations = $this->analyzeConversation($conversation, $userId, $visitorEmail);
             $this->applyMemoryOperations($conversation->feature, $operations, $conversation->id, $userId, $visitorEmail);
@@ -222,7 +225,7 @@ class AiMemoryService
                 'feature' => $conversation->feature,
                 'user_id' => $userId,
                 'visitor_email' => $visitorEmail,
-                'error' => $e->getMessage(),
+                ...RedactedException::diagnostic($e),
             ]);
         }
     }
@@ -233,9 +236,19 @@ class AiMemoryService
      */
     public function rebuildMemories(string $feature): void
     {
+        // Only conversations processCompletedConversation() will analyse: an
+        // operator run or an anonymous conversation counted here would let the
+        // deactivation below run with nothing to rebuild from.
         $conversations = AiConversation::query()
             ->where('feature', $feature)
             ->where('status', AiConversationStatus::Completed)
+            ->whereNull('ai_operator_id')
+            // user_id is a foreign key (an integer for most user models), so
+            // it is not compared with '': Postgres rejects that for a bigint.
+            ->where(function ($query): void {
+                $query->whereNotNull('user_id')
+                    ->orWhere(fn ($q) => $q->whereNotNull('visitor_email')->where('visitor_email', '!=', ''));
+            })
             ->orderBy('created_at')
             ->get();
 
@@ -243,7 +256,7 @@ class AiMemoryService
         // them here would destroy every memory for the feature and replace it
         // with nothing.
         if ($conversations->isEmpty()) {
-            Log::warning('AI Memory rebuild found no completed conversations; existing memories left untouched', [
+            Log::warning('AI Memory rebuild found no eligible completed conversations; existing memories left untouched', [
                 'feature' => $feature,
             ]);
 

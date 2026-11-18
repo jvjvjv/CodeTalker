@@ -133,16 +133,14 @@ class CodeTalkerConversationStore implements ConversationStore
                 : [new Message('user', $content)];
         }
 
-        $toolCalls = collect($record->tool_calls ?? [])->values();
-        $toolResults = collect($record->tool_results ?? [])->values();
+        [$toolCalls, $toolResults] = $this->matchedToolActivity(
+            collect($record->tool_calls ?? [])->values(),
+            collect($record->tool_results ?? [])->values(),
+        );
 
         if ($toolCalls->isEmpty()) {
             // Providers reject an empty assistant turn, which a cut-off
             // reasoning-only turn can leave behind.
-            return filled($content) ? [new AssistantMessage($content)] : [];
-        }
-
-        if ($toolResults->isEmpty()) {
             return filled($content) ? [new AssistantMessage($content)] : [];
         }
 
@@ -156,6 +154,38 @@ class CodeTalkerConversationStore implements ConversationStore
         }
 
         return $messages;
+    }
+
+    /**
+     * Keep only the tool calls that have a recorded result, and the results
+     * that answer a kept call.
+     *
+     * A turn cut short between two tool results is persisted as it happened —
+     * every call, but not every result. Replaying the unanswered call would
+     * leave the provider waiting for a result that never comes, and it rejects
+     * every later turn of the conversation for it.
+     *
+     * @param Collection<int, mixed> $toolCalls
+     * @param Collection<int, mixed> $toolResults
+     * @return array{0: Collection<int, array<string, mixed>>, 1: Collection<int, array<string, mixed>>}
+     */
+    private function matchedToolActivity(Collection $toolCalls, Collection $toolResults): array
+    {
+        $idOf = static fn (mixed $entry): ?string => is_array($entry) && isset($entry['id'])
+            ? (string) $entry['id']
+            : null;
+
+        $answered = $toolResults->map($idOf)->reject(static fn (?string $id): bool => $id === null)->flip();
+        $toolCalls = $toolCalls
+            ->filter(static fn (mixed $call): bool => ($id = $idOf($call)) !== null && $answered->has($id))
+            ->values();
+
+        $called = $toolCalls->map($idOf)->flip();
+        $toolResults = $toolResults
+            ->filter(static fn (mixed $result): bool => ($id = $idOf($result)) !== null && $called->has($id))
+            ->values();
+
+        return [$toolCalls, $toolResults];
     }
 
     /**

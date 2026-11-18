@@ -2,7 +2,7 @@
 
 ## Purpose
 
-TBD - created by archiving change add-persona-and-operator-concepts. Update Purpose after archive.
+Defines operators: bounded, non-conversational units of AI work that a host dispatches itself, built from a prompt template and caller-supplied context, and recorded through the same audit and cost tracking as persona conversations.
 
 ## Requirements
 

@@ -2,6 +2,9 @@
 
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
+use Illuminate\Routing\Route;
+use Illuminate\Support\Arr;
+use Jvjvjv\CodeTalker\CodeTalkerServiceProvider;
 use Jvjvjv\CodeTalker\Mcp\Servers\CodeTalkerServer;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\FetchWebPageTool;
 use Jvjvjv\CodeTalker\Services\Mcp\Tools\ChatBot\GetTemporalInformationTool;
@@ -47,5 +50,52 @@ class CodeTalkerServerToolsTest extends TestCase
 
         // The contrast: ScanMemoriesTool does gate, and hides from an anonymous caller.
         $this->assertFalse((new ScanMemoriesTool(new ToolContext()))->eligibleForRegistration());
+    }
+
+    /**
+     * A host whose published config predates `mcp.web.middleware` still gets
+     * an authenticated route: the caller is what scopes the tools' user data.
+     */
+    public function testTheWebTransportIsAuthenticatedWhenTheMiddlewareKeyIsMissing(): void
+    {
+        config(['code-talker.mcp.enabled' => true, 'code-talker.mcp.web.path' => 'mcp/defaulted']);
+        $web = config('code-talker.mcp.web');
+        config(['code-talker.mcp.web' => Arr::except($web, 'middleware')]);
+
+        $this->registerMcpServers();
+
+        $this->assertContains('auth:sanctum', $this->routeAt('mcp/defaulted')->middleware());
+    }
+
+    public function testAnExplicitMiddlewareListIsHonoured(): void
+    {
+        config([
+            'code-talker.mcp.enabled' => true,
+            'code-talker.mcp.web.path' => 'mcp/custom',
+            'code-talker.mcp.web.middleware' => ['auth:api'],
+        ]);
+
+        $this->registerMcpServers();
+
+        $middleware = $this->routeAt('mcp/custom')->middleware();
+        $this->assertContains('auth:api', $middleware);
+        $this->assertNotContains('auth:sanctum', $middleware);
+    }
+
+    private function registerMcpServers(): void
+    {
+        $provider = new CodeTalkerServiceProvider($this->app);
+        (fn () => $this->registerMcpServers())->call($provider);
+        $this->app['router']->getRoutes()->refreshNameLookups();
+    }
+
+    private function routeAt(string $uri): Route
+    {
+        $route = collect($this->app['router']->getRoutes()->getRoutes())
+            ->first(fn (Route $route): bool => $route->uri() === $uri && in_array('POST', $route->methods(), true));
+
+        $this->assertNotNull($route, "No POST route registered at {$uri}.");
+
+        return $route;
     }
 }

@@ -1,7 +1,7 @@
 # ai-system-web-scoping Specification
 
 ## Purpose
-TBD - created by openspec-sync-specs from change scope-http-request-per-ai-system. Update Purpose after archive.
+Lets an AiSystem limit the domains its web tools may reach and supply the credentials attached to requests for those domains, with the scoping re-derived on every redirect hop.
 
 ## Requirements
 

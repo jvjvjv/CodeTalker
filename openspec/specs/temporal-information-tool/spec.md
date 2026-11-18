@@ -1,7 +1,7 @@
 # temporal-information-tool Specification
 
 ## Purpose
-TBD - created by openspec-sync-specs from change add-temporal-and-http-request-tools. Update Purpose after archive.
+Gives the agent the current date and time in a timezone or UTC offset the caller names, with pre-computed calendar parts, refusing a timezone it cannot resolve rather than falling back to a default.
 ## Requirements
 
 ### Requirement: The agent can read the current date and time

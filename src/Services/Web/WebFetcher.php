@@ -5,9 +5,11 @@ namespace Jvjvjv\CodeTalker\Services\Web;
 use GuzzleHttp\Psr7\Uri;
 use GuzzleHttp\Psr7\UriResolver;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Support\WebScraperUserAgent;
+use Psr\Http\Message\ResponseInterface;
 use Symfony\Component\DomCrawler\Crawler;
 
 /**
@@ -41,7 +43,50 @@ class WebFetcher
     private const CREDENTIAL_HEADERS = [
         'authorization',
         'cookie',
+        'x-api-key',
+        'api-key',
+        'x-auth-token',
+        'x-access-token',
+        'x-session-token',
+        'x-goog-api-key',
+        'x-amz-security-token',
     ];
+
+    /**
+     * The only caller-supplied headers forwarded on a redirect hop to a host
+     * other than the one the caller named. Anything else the caller set was
+     * meant for that host.
+     */
+    private const CROSS_HOST_SAFE_HEADERS = [
+        'accept',
+        'accept-language',
+        'content-type',
+        'if-none-match',
+        'if-modified-since',
+        'range',
+        'x-request-id',
+    ];
+
+    /**
+     * {@see redactUrl()} masks a query parameter whose name contains one of
+     * these (so `x-amz-security-token`, `client_secret`, `X-Goog-Signature`),
+     * or is one of {@see REDACTED_QUERY_NAMES}. Matching by fragment over-masks
+     * the odd harmless name in a log line, which costs nothing; an exact list
+     * misses every vendor's own spelling.
+     */
+    private const REDACTED_QUERY_FRAGMENTS = [
+        'key',
+        'token',
+        'secret',
+        'signature',
+        'credential',
+        'password',
+        'passwd',
+        'session',
+    ];
+
+    /** Names too short to match as fragments without masking everything. */
+    private const REDACTED_QUERY_NAMES = ['sig', 'code', 'auth', 'pwd'];
 
     /**
      * Request headers a caller may never set, regardless of policy.
@@ -92,6 +137,53 @@ class WebFetcher
     }
 
     /**
+     * A URL safe to log or return in an error: userinfo removed, and the
+     * values of credential-like query parameters replaced with `***`.
+     */
+    public static function redactUrl(string $url): string
+    {
+        return self::redactText($url);
+    }
+
+    /**
+     * {@see redactUrl()} applied to every URL inside a longer string, such as
+     * a transport exception message.
+     *
+     * Userinfo runs to the *last* `@` in the authority, which is where cURL
+     * and parse_url() split it: an unencoded `@` in a password would
+     * otherwise leave the rest of the password in place as a fake username.
+     */
+    public static function redactText(string $text): string
+    {
+        $text = preg_replace('#\b([a-z][a-z0-9+.\-]*://)[^/?\#\s]*@#i', '$1', $text) ?? $text;
+
+        return preg_replace_callback(
+            '/([?&])([^=&#\s]+)=([^&#\s]*)/',
+            static fn (array $match): string => self::isSensitiveParameter($match[2])
+                ? $match[1] . $match[2] . '=***'
+                : $match[0],
+            $text,
+        ) ?? $text;
+    }
+
+    private static function isSensitiveParameter(string $name): bool
+    {
+        $name = strtolower(rawurldecode($name));
+
+        if (in_array($name, self::REDACTED_QUERY_NAMES, true)) {
+            return true;
+        }
+
+        foreach (self::REDACTED_QUERY_FRAGMENTS as $fragment) {
+            if (str_contains($name, $fragment)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Fetch a readable web page — the `fetch-web-page` behavior.
      *
      * GET only, and only HTML, XHTML, or plain text. Every error string here is
@@ -103,14 +195,19 @@ class WebFetcher
         bool $keepHtml = false,
         string $targetSelector = '',
         bool $truncate = true,
+        bool $fromExternalCaller = false,
     ): FetchedResponse {
-        $sent = $this->sendFollowingRedirects('GET', $url, null, [], $policy);
+        $sent = $this->sendFollowingRedirects('GET', $url, null, [], $policy, fromExternalCaller: $fromExternalCaller);
 
         if ($sent instanceof FetchedResponse) {
             return $sent;
         }
 
-        [$status, $contentType, $body, , $finalUrl] = $sent;
+        [$status, $contentType, $body, , $finalUrl, $reason] = $sent;
+
+        if ($status >= 400) {
+            return FetchedResponse::failure($finalUrl, $this->errorStatusMessage($finalUrl, $status, $reason), $status);
+        }
 
         if ($body === '') {
             return FetchedResponse::failure($finalUrl, 'The page returned an empty response body.');
@@ -139,10 +236,13 @@ class WebFetcher
      * follow up to five hops, which would let a public URL bounce the request
      * into a private network behind the caller's back — the gate would have
      * validated only the first hop. Each hop is instead re-validated through
-     * $validateHop before it is issued.
+     * the gate before it is issued.
+     *
+     * A non-2xx response is a failure that still carries its decoded body,
+     * because an API's error body is what the caller needs to correct the
+     * request.
      *
      * @param array<string, mixed> $headers
-     * @param (callable(string, string): ?string)|null $validateHop Given a URL and method, returns a refusal message or null
      */
     public function request(
         string $method,
@@ -153,6 +253,7 @@ class WebFetcher
         bool $keepHtml = false,
         string $targetSelector = '',
         bool $truncate = true,
+        bool $fromExternalCaller = false,
     ): FetchedResponse {
         [$safeHeaders, $credentialHeaders, $strippedHeaders] = $this->filterRequestHeaders($headers);
 
@@ -168,18 +269,37 @@ class WebFetcher
             $safeHeaders,
             $policy,
             $credentialHeaders,
-            strtolower((string) parse_url($url, PHP_URL_HOST)),
+            self::originOf($url),
+            $fromExternalCaller,
         );
 
         if ($sent instanceof FetchedResponse) {
             return $sent->withStrippedHeaders($strippedHeaders);
         }
 
-        [$status, $contentType, $responseBody, , $finalUrl] = $sent;
+        [$status, $contentType, $responseBody, , $finalUrl, $reason] = $sent;
 
-        return $this
-            ->decode($finalUrl, $status, $contentType, $responseBody, $keepHtml, $targetSelector, $truncate)
-            ->withStrippedHeaders($strippedHeaders);
+        $decoded = $this->decode($finalUrl, $status, $contentType, $responseBody, $keepHtml, $targetSelector, $truncate);
+
+        if ($status >= 400) {
+            $error = $this->errorStatusMessage($finalUrl, $status, $reason);
+
+            $decoded = $decoded->failed()
+                ? FetchedResponse::failure($finalUrl, $error, $status)
+                : $decoded->withError($error);
+        }
+
+        return $decoded->withStrippedHeaders($strippedHeaders);
+    }
+
+    private function errorStatusMessage(string $url, int $status, string $reason): string
+    {
+        return sprintf(
+            'Failed to fetch %s. The server responded with HTTP status %d (%s).',
+            self::redactUrl($url),
+            $status,
+            $reason !== '' ? $reason : 'Unknown',
+        );
     }
 
     /**
@@ -189,14 +309,16 @@ class WebFetcher
      * to a different host cannot carry the first host's token with it. This
      * applies equally to `$credentialHeaders` — the caller's own Authorization/
      * Cookie, permitted by {@see allowsCredentialHeaders()} — which is sent
-     * only while the current hop's host still matches `$originalHost`: the
-     * model attached that header to the host it named, not to wherever a
-     * redirect happens to end up, even one within the same AiSystem's
-     * allow-list.
+     * only while the current hop's origin (scheme, host, and port) still
+     * matches `$originalOrigin`: the model attached that header to the origin
+     * it named, not to wherever a redirect happens to end up, even one within
+     * the same AiSystem's allow-list. Comparing the host alone would let a
+     * same-host redirect from https to http carry it in clear text. The caller's other headers follow the same rule, except for
+     * the benign {@see CROSS_HOST_SAFE_HEADERS}.
      *
      * @param array<string, string> $safeHeaders
      * @param array<string, string> $credentialHeaders
-     * @return array{0: int, 1: string, 2: string, 3: ?string, 4: string}|FetchedResponse
+     * @return array{0: int, 1: string, 2: string, 3: ?string, 4: string, 5: string}|FetchedResponse
      */
     private function sendFollowingRedirects(
         string $method,
@@ -205,30 +327,38 @@ class WebFetcher
         array $safeHeaders,
         RequestPolicy $policy,
         array $credentialHeaders = [],
-        string $originalHost = '',
+        string $originalOrigin = '',
+        bool $fromExternalCaller = false,
     ): array|FetchedResponse {
         $currentUrl = $url;
         $currentMethod = $method;
         $currentBody = $body;
+        $methodFromRedirect = false;
 
         for ($hop = 0; $hop <= self::MAX_REDIRECTS; $hop++) {
-            $refusal = $this->gate->refuse($currentUrl, $currentMethod, $policy, $this->policy->allowedDomains);
+            $refusal = $this->gate->refuse(
+                $currentUrl,
+                $currentMethod,
+                $policy,
+                $this->policy->allowedDomains,
+                $fromExternalCaller,
+                $methodFromRedirect,
+            );
 
             if ($refusal !== null) {
                 return FetchedResponse::failure(
-                    $currentUrl,
+                    self::redactUrl($currentUrl),
                     $hop === 0 ? $refusal : sprintf(
                         'The request was redirected to %s, and that destination was refused. %s',
-                        $currentUrl,
+                        self::redactUrl($currentUrl),
                         $refusal,
                     ),
                 );
             }
 
-            $currentHost = strtolower((string) parse_url($currentUrl, PHP_URL_HOST));
-            $headersForHop = $currentHost === $originalHost
+            $headersForHop = self::originOf($currentUrl) === $originalOrigin
                 ? $this->mergeHeaders($safeHeaders, $credentialHeaders)
-                : $safeHeaders;
+                : $this->crossHostSafe($safeHeaders);
 
             $sent = $this->send(
                 $currentMethod,
@@ -244,34 +374,64 @@ class WebFetcher
                 return $sent;
             }
 
-            [$status, $contentType, $responseBody, $location] = $sent;
+            [$status, $contentType, $responseBody, $location, $reason] = $sent;
 
             if ($location === null || !$this->isRedirect($status)) {
-                return [$status, $contentType, $responseBody, $location, $currentUrl];
+                return [$status, $contentType, $responseBody, $location, $currentUrl, $reason];
             }
 
             $currentUrl = $this->resolveLocation($currentUrl, $location);
 
             if ($currentUrl === null) {
                 return FetchedResponse::failure(
-                    $url,
-                    sprintf('The server redirected to a location that could not be resolved: "%s".', $location),
+                    self::redactUrl($url),
+                    sprintf('The server redirected to a location that could not be resolved: "%s".', self::redactUrl($location)),
                     $status,
                 );
             }
 
             // 303 always becomes a GET, and 301/302 do in practice; 307/308 preserve
-            // the method and body. This mirrors Guzzle's non-strict behavior.
+            // the method and body. This mirrors Guzzle's non-strict behavior. The
+            // GET is the server's choice, not the caller's, so the caller's
+            // allowed_methods does not govern it.
             if (in_array($status, [301, 302, 303], true)) {
+                $methodFromRedirect = $methodFromRedirect || $currentMethod !== 'GET';
                 $currentMethod = 'GET';
                 $currentBody = null;
             }
         }
 
-        return FetchedResponse::failure($url, sprintf(
+        return FetchedResponse::failure(self::redactUrl($url), sprintf(
             'The request exceeded %d redirects without reaching a final response.',
             self::MAX_REDIRECTS,
         ));
+    }
+
+    /**
+     * Scheme, host, and effective port — what a hop must keep for the
+     * caller's own headers to travel with it.
+     */
+    private static function originOf(string $url): string
+    {
+        $scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+        $port = parse_url($url, PHP_URL_PORT) ?: ($scheme === 'https' ? 443 : 80);
+
+        return $scheme . '://' . strtolower((string) parse_url($url, PHP_URL_HOST)) . ':' . $port;
+    }
+
+    /**
+     * The caller's headers that may travel to a host other than the one named.
+     *
+     * @param array<string, string> $headers
+     * @return array<string, string>
+     */
+    private function crossHostSafe(array $headers): array
+    {
+        return array_filter(
+            $headers,
+            static fn (string $name): bool => in_array(strtolower(trim($name)), self::CROSS_HOST_SAFE_HEADERS, true),
+            ARRAY_FILTER_USE_KEY,
+        );
     }
 
     private function isRedirect(int $status): bool
@@ -304,8 +464,16 @@ class WebFetcher
      * The address the gate validated is pinned into the connection, so the host
      * cannot resolve to somewhere else between the check and the socket.
      *
+     * The body is received into a {@see CappedBodySink}, which stops the
+     * transfer once the body cap is reached. The aborted transfer surfaces as
+     * an exception; when the sink reports it was the cap, the response is
+     * rebuilt from the headers already received and the truncated body.
+     *
+     * Any status is returned as a tuple; deciding what a non-2xx means is the
+     * caller's job.
+     *
      * @param array<string, mixed> $headers
-     * @return array{0: int, 1: string, 2: string, 3: ?string}|FetchedResponse Tuple on success, failure otherwise
+     * @return array{0: int, 1: string, 2: string, 3: ?string, 4: string}|FetchedResponse Tuple once a response arrived, failure otherwise
      */
     private function send(
         string $method,
@@ -313,48 +481,65 @@ class WebFetcher
         ?string $body,
         array $headers,
     ): array|FetchedResponse {
-        $request = Http::connectTimeout(self::CONNECT_TIMEOUT)
-            ->timeout(self::TIMEOUT)
-            ->withHeaders($this->mergeHeaders($this->defaultHeaders(), $headers))
-            ->withOptions(array_merge(
-                ['allow_redirects' => false],
-                $this->addressPinFor($url),
-            ));
-
-        if ($body !== null && $body !== '') {
-            $request = $request->withBody($body, $this->requestContentType($headers));
-        }
+        $sink = CappedBodySink::open(self::maxBodyLength());
+        $received = null;
 
         try {
-            $response = $request->send($method, $url);
+            $request = Http::connectTimeout(self::CONNECT_TIMEOUT)
+                ->timeout(self::TIMEOUT)
+                ->withHeaders($this->mergeHeaders($this->defaultHeaders(), $headers))
+                ->withOptions(array_merge(
+                    [
+                        'allow_redirects' => false,
+                        'sink' => $sink,
+                        'on_headers' => static function (ResponseInterface $response) use (&$received): void {
+                            $received = $response;
+                        },
+                    ],
+                    $this->addressPinFor($url),
+                ));
+
+            if ($body !== null && $body !== '') {
+                $request = $request->withBody($body, $this->requestContentType($headers));
+            }
+
+            try {
+                $response = $request->send($method, $url);
+            } catch (\Throwable $e) {
+                if ($received === null || !CappedBodySink::reachedCap($sink)) {
+                    throw $e;
+                }
+
+                $response = new Response($received);
+            }
         } catch (ConnectionException $e) {
             Log::warning($this->logLabel . ' could not connect', [
-                'url' => $url,
-                'error' => $e->getMessage(),
+                'url' => self::redactUrl($url),
+                'error' => self::redactText($e->getMessage()),
             ]);
 
             return FetchedResponse::failure(
-                $url,
-                sprintf('Could not connect to %s. The request failed before receiving a response.', $url),
+                self::redactUrl($url),
+                sprintf('Could not connect to %s. The request failed before receiving a response.', self::redactUrl($url)),
+            );
+        } catch (\InvalidArgumentException $e) {
+            // Guzzle refuses to build a request from a malformed URL or header.
+            Log::warning($this->logLabel . ' could not build the request', [
+                'url' => self::redactUrl($url),
+                'error' => self::redactText($e->getMessage()),
+            ]);
+
+            return FetchedResponse::failure(
+                self::redactUrl($url),
+                'This request was not sent. The URL or one of the request headers is malformed.',
             );
         }
 
         if ($response->failed()) {
             Log::warning($this->logLabel . ' received an error response', [
-                'url' => $url,
+                'url' => self::redactUrl($url),
                 'status' => $response->status(),
             ]);
-
-            return FetchedResponse::failure(
-                $url,
-                sprintf(
-                    'Failed to fetch %s. The server responded with HTTP status %d (%s).',
-                    $url,
-                    $response->status(),
-                    $response->reason() ?: 'Unknown',
-                ),
-                $response->status(),
-            );
         }
 
         $location = $response->header('Location');
@@ -364,6 +549,7 @@ class WebFetcher
             strtolower((string) ($response->header('Content-Type') ?? '')),
             mb_substr($response->body(), 0, self::maxBodyLength()),
             ($location === null || $location === '') ? null : $location,
+            (string) $response->reason(),
         ];
     }
 
@@ -422,11 +608,24 @@ class WebFetcher
             'User-Agent' => WebScraperUserAgent::forBotName($this->botName),
             'Accept' => 'text/html;q=1.0,application/xhtml+xml;q=0.9,application/xml;q=0.8,text/plain;q=0.5,*/*;q=0.7',
             'Accept-Language' => 'en-US,en;q=0.5',
-            'Accept-Encoding' => 'gzip, deflate, br',
+            'Accept-Encoding' => $this->acceptEncoding(),
             'Cache-Control' => 'no-cache',
             'Pragma' => 'no-cache',
             'Upgrade-Insecure-Requests' => '1',
         ];
+    }
+
+    /**
+     * The encodings advertised to the server: only those cURL can decode, so
+     * a brotli body never arrives at a client that cannot read it.
+     */
+    private function acceptEncoding(): string
+    {
+        $brotli = function_exists('curl_version')
+            && defined('CURL_VERSION_BROTLI')
+            && (curl_version()['features'] & CURL_VERSION_BROTLI) !== 0;
+
+        return $brotli ? 'gzip, deflate, br' : 'gzip, deflate';
     }
 
     /**
@@ -532,6 +731,9 @@ class WebFetcher
      * the host has cached config, so a host that published code-talker.php
      * before this key existed would otherwise resolve null in production only.
      *
+     * Attached only over https, or to a loopback address, so a plain-http
+     * request — including an https-to-http redirect — never carries them.
+     *
      * @return array<string, string>
      */
     private function credentialsFor(string $url): array
@@ -540,6 +742,14 @@ class WebFetcher
 
         if ($host === '') {
             return [];
+        }
+
+        if (strtolower((string) parse_url($url, PHP_URL_SCHEME)) !== 'https') {
+            $address = $this->gate->validatedAddressFor($url);
+
+            if ($address === null || !HostGate::isLoopbackAddress($address)) {
+                return [];
+            }
         }
 
         $scoped = $this->policy->credentialsFor($host);

@@ -5,7 +5,6 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\CodeTalkerServiceProvider;
 use Jvjvjv\CodeTalker\Enums\AiTurnRunStatus;
 use Jvjvjv\CodeTalker\Jobs\ProcessAiMemoryJob;
@@ -19,6 +18,7 @@ use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Models\AiSystem;
 use Jvjvjv\CodeTalker\Services\AiPersonaConversationService;
 use Jvjvjv\CodeTalker\Services\ChatBot\SseFrameEncoder;
+use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnErrorMessage;
 use Jvjvjv\CodeTalker\Services\AiMemoryService;
 use Jvjvjv\CodeTalker\Services\ConversationUsageService;
 use Jvjvjv\CodeTalker\Services\LaravelAi\AgentFactory;
@@ -60,19 +60,6 @@ class AiPersonaConversationServiceTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        // AiConversation::booted() assigns a uuid, but no package migration
-        // creates the column (host apps add it themselves).
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     protected function tearDown(): void
@@ -856,7 +843,9 @@ class AiPersonaConversationServiceTest extends TestCase
 
         $error = collect($events)->firstWhere('type', 'error');
         $this->assertNotNull($error);
-        $this->assertStringContainsString('Context size has been exceeded', $error['message']);
+        // Fixed text on the wire; the provider's own message is logged only.
+        $this->assertSame(TurnErrorMessage::for('provider_error'), $error['message']);
+        $this->assertStringNotContainsString('Context size has been exceeded', $error['message']);
         $this->assertSame('provider_error', $error['reason']);
 
         $log = AiInteractionLog::first();
@@ -883,7 +872,9 @@ class AiPersonaConversationServiceTest extends TestCase
 
         $error = collect($events)->firstWhere('type', 'error');
         $this->assertNotNull($error);
-        $this->assertStringContainsString('Unsupported AI provider', $error['message']);
+        // Fixed text on the wire; the provider's own message is logged only.
+        $this->assertSame(TurnErrorMessage::for('provider_error'), $error['message']);
+        $this->assertStringNotContainsString('Unsupported AI provider', $error['message']);
         $this->assertSame('provider_error', $error['reason']);
 
         $log = AiInteractionLog::first();

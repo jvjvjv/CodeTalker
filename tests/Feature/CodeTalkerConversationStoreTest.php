@@ -3,7 +3,6 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Models\AiPersona;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiConversationMessage;
@@ -23,17 +22,6 @@ class CodeTalkerConversationStoreTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     private function store(): CodeTalkerConversationStore
@@ -202,6 +190,54 @@ class CodeTalkerConversationStoreTest extends TestCase
 
         $this->assertCount(1, $messages);
         $this->assertInstanceOf(AssistantMessage::class, $messages[0]);
+    }
+
+    /**
+     * A turn cut short between two tool results stores both calls but only one
+     * result. Replaying the unanswered call would get every later turn of the
+     * conversation rejected by the provider.
+     */
+    public function test_a_tool_call_without_a_matching_result_is_dropped_from_replay(): void
+    {
+        $conversation = $this->makeConversation();
+
+        $this->message($conversation, [
+            'role' => 'assistant',
+            'content' => '',
+            'tool_calls' => [
+                ['id' => 'call_1', 'name' => 'search-web', 'arguments' => ['query' => 'one']],
+                ['id' => 'call_2', 'name' => 'search-web', 'arguments' => ['query' => 'two']],
+            ],
+            'tool_results' => [
+                ['id' => 'call_1', 'name' => 'search-web', 'arguments' => ['query' => 'one'], 'result' => 'First'],
+            ],
+        ]);
+
+        $messages = $this->store()->getLatestConversationMessages((string) $conversation->id, 100);
+
+        $this->assertCount(2, $messages);
+        $this->assertInstanceOf(AssistantMessage::class, $messages[0]);
+        $this->assertSame(['call_1'], $messages[0]->toolCalls->pluck('id')->all());
+        $this->assertInstanceOf(ToolResultMessage::class, $messages[1]);
+        $this->assertSame(['call_1'], $messages[1]->toolResults->pluck('id')->all());
+    }
+
+    public function test_results_that_answer_no_recorded_call_fall_back_to_text(): void
+    {
+        $conversation = $this->makeConversation();
+
+        $this->message($conversation, [
+            'role' => 'assistant',
+            'content' => 'Partial answer.',
+            'tool_calls' => [['id' => 'call_1', 'name' => 'search-web', 'arguments' => []]],
+            'tool_results' => [['id' => 'call_9', 'name' => 'search-web', 'arguments' => [], 'result' => 'Stray']],
+        ]);
+
+        $messages = $this->store()->getLatestConversationMessages((string) $conversation->id, 100);
+
+        $this->assertCount(1, $messages);
+        $this->assertInstanceOf(AssistantMessage::class, $messages[0]);
+        $this->assertSame('Partial answer.', $messages[0]->content);
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
 use Jvjvjv\CodeTalker\Models\AiMcpServer;
@@ -115,6 +116,22 @@ class AiMcpServerManagerTest extends TestCase
         }
     }
 
+    public function test_the_published_update_rules_accept_a_json_null_auth(): void
+    {
+        $this->assertFalse(
+            Validator::make(['name' => 'MDN', 'url' => self::URL, 'auth' => 'null'], AiMcpServerManager::updateRules())->fails()
+        );
+    }
+
+    public function test_a_json_null_auth_on_create_stores_no_auth(): void
+    {
+        (new FakeMcpServer(self::URL, [FakeMcpServer::tool('search')]))->fake();
+
+        $server = $this->manager()->create($this->validData(['auth' => 'null']))['server'];
+
+        $this->assertNull($server->fresh()->auth);
+    }
+
     public function test_a_duplicate_slug_is_rejected(): void
     {
         (new FakeMcpServer(self::URL))->fake();
@@ -138,6 +155,49 @@ class AiMcpServerManagerTest extends TestCase
         $this->assertSame('mdn', $server->slug);
         $this->assertSame('MDN Docs', $server->name);
         $this->assertSame('keep-me', $server->auth['token']);
+    }
+
+    /**
+     * @return array<string, array{0: mixed}>
+     */
+    public static function blankAuth(): array
+    {
+        return [
+            'null' => [null],
+            'empty string' => [''],
+            'JSON null' => ['null'],
+        ];
+    }
+
+    #[DataProvider('blankAuth')]
+    public function test_a_blank_auth_on_update_keeps_the_stored_credentials(mixed $auth): void
+    {
+        $fake = (new FakeMcpServer(self::URL, [FakeMcpServer::tool('search')]))->fake();
+        $server = $this->manager()->create($this->validData([
+            'auth' => ['type' => 'bearer', 'token' => 'keep-me'],
+        ]))['server'];
+
+        $result = $this->manager()->update($server, ['name' => 'MDN Docs', 'auth' => $auth]);
+
+        $this->assertNull($result['sync']['error']);
+        $this->assertSame(['type' => 'bearer', 'token' => 'keep-me'], $server->fresh()->auth);
+
+        // The sync that followed the update still authenticated.
+        $last = collect(Http::recorded())->last()[0];
+        $this->assertSame(['Bearer keep-me'], $last->header('Authorization'));
+        $this->assertGreaterThan(0, $fake->requests);
+    }
+
+    public function test_an_explicit_none_auth_on_update_clears_the_credentials(): void
+    {
+        (new FakeMcpServer(self::URL))->fake();
+        $server = $this->manager()->create($this->validData([
+            'auth' => ['type' => 'bearer', 'token' => 'drop-me'],
+        ]))['server'];
+
+        $this->manager()->update($server, ['auth' => ['type' => 'none']]);
+
+        $this->assertSame(['type' => 'none'], $server->fresh()->auth);
     }
 
     public function test_sync_all_reports_each_enabled_server_independently(): void

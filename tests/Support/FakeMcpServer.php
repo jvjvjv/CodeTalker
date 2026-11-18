@@ -31,6 +31,11 @@ class FakeMcpServer
 
     private ?Closure $override = null;
 
+    private bool $endlessPages = false;
+
+    /** @var array{0: int, 1: string}|null */
+    private ?array $initializeError = null;
+
     /**
      * @param array<int, array<string, mixed>>|array<int, array<int, array<string, mixed>>> $tools
      *        a flat list of tool payloads, or a list of pages of them
@@ -82,6 +87,27 @@ class FakeMcpServer
     }
 
     /**
+     * Answer every `tools/list` page with a fresh cursor, forever — the
+     * listing a sync must refuse to follow without bound.
+     */
+    public function endlessPages(): static
+    {
+        $this->endlessPages = true;
+
+        return $this;
+    }
+
+    /**
+     * Answer the `initialize` handshake with a JSON-RPC error.
+     */
+    public function rejectInitialize(int $code = -32600, string $message = 'Unsupported protocol version'): static
+    {
+        $this->initializeError = [$code, $message];
+
+        return $this;
+    }
+
+    /**
      * @param Closure(Request): mixed $override answers every request instead of the fake protocol
      */
     public function respondWith(Closure $override): static
@@ -124,7 +150,7 @@ class FakeMcpServer
         $params = $message['params'] ?? [];
 
         $result = match ($method) {
-            'initialize' => [
+            'initialize' => $this->initializeError !== null ? ['__error' => $this->initializeError] : [
                 'protocolVersion' => ProtocolVersion::LATEST->value,
                 'capabilities' => ['tools' => (object) []],
                 'serverInfo' => ['name' => 'fake', 'version' => '1.0.0'],
@@ -152,7 +178,7 @@ class FakeMcpServer
         $index = $cursor === null ? 0 : (int) $cursor;
         $page = ['tools' => $this->toolPages[$index] ?? []];
 
-        if (isset($this->toolPages[$index + 1])) {
+        if ($this->endlessPages || isset($this->toolPages[$index + 1])) {
             $page['nextCursor'] = (string) ($index + 1);
         }
 

@@ -5,6 +5,7 @@ namespace Jvjvjv\CodeTalker\Services\Conversation;
 use Generator;
 use Jvjvjv\CodeTalker\Models\AiTurnEvent;
 use Jvjvjv\CodeTalker\Models\AiTurnRun;
+use Jvjvjv\CodeTalker\Services\ChatBot\Conversation\TurnErrorMessage;
 
 /**
  * The read side of a detached turn: replays a run's events from any point and
@@ -71,11 +72,7 @@ class TurnEventStream
             }
 
             if ($maxSeconds > 0 && microtime(true) - $startedAt > $maxSeconds) {
-                yield [
-                    'type' => 'error',
-                    'message' => "The turn exceeded the maximum stream duration of {$maxSeconds}s.",
-                    'reason' => 'max_stream_duration',
-                ];
+                yield TurnErrorMessage::event(TurnErrorMessage::MAX_STREAM_DURATION);
 
                 return;
             }

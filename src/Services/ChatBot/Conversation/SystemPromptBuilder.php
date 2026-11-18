@@ -3,7 +3,6 @@
 namespace Jvjvjv\CodeTalker\Services\ChatBot\Conversation;
 
 use Jvjvjv\CodeTalker\Models\AiPersona;
-use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Services\AiMemoryService;
 
 /**
@@ -18,11 +17,15 @@ class SystemPromptBuilder
     ) {
     }
 
+    /**
+     * The visitor fields are interpolated as given, so the caller sanitises
+     * them first (see VisitorIdentity).
+     */
     public function build(
         AiPersona $persona,
-        ?AiConversation $conversation = null,
         ?string $visitorName = null,
         ?string $visitorEmail = null,
+        string|int|null $userId = null,
     ): string {
         $prompt = strtr($persona->prompt_template, [
             '{{persona_name}}' => $persona->name,
@@ -33,7 +36,7 @@ class SystemPromptBuilder
         ]);
 
         $systemPrompt = trim((string) $persona->aiSystem?->system_prompt);
-        $memoryPrompt = trim($this->memories($persona, $conversation));
+        $memoryPrompt = trim($this->memories($persona, $userId, $visitorEmail));
 
         return collect([
             $systemPrompt !== '' ? $systemPrompt : null,
@@ -43,22 +46,13 @@ class SystemPromptBuilder
     }
 
     /**
-     * Memories are scoped to whoever is talking. During a live conversation that
-     * identity comes from the conversation itself; when opening one, the only
-     * identity available is the authenticated user, if any.
+     * Memories are scoped to the identity of the conversation being opened, as
+     * the caller supplies it — never to the ambient authenticated session. A
+     * turn driven from a queue or the console has no session, and one driven
+     * on another user's behalf has the wrong one.
      */
-    private function memories(AiPersona $persona, ?AiConversation $conversation): string
+    private function memories(AiPersona $persona, string|int|null $userId, ?string $visitorEmail): string
     {
-        $userId = null;
-        $visitorEmail = null;
-
-        if ($conversation !== null) {
-            $userId = $conversation->user_id;
-            $visitorEmail = $conversation->visitor_email;
-        } elseif (auth()->check()) {
-            $userId = auth()->id();
-        }
-
         return $this->memoryService->getMemoriesForPrompt($persona->featureKey(), $userId, $visitorEmail);
     }
 }

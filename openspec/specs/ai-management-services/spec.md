@@ -2,13 +2,13 @@
 
 ## Purpose
 
-TBD - created by archiving change extract-admin-service-layer. Update Purpose after archive.
+Gives a host everything an admin UI needs (systems, system prompts, personas, operators, conversations, memories, feature defaults and MCP servers) as services that carry their own validation rules, so the package ships management capability without routes, controllers or components.
 
 ## Requirements
 
 ### Requirement: AI systems are managed through a service
 
-The package SHALL expose a service that performs every write operation on `AiSystem` records, so a host app can manage systems from its own controllers, commands, or tests without reimplementing the persistence pipeline.
+The package SHALL expose a service that performs every write operation on `AiSystem` records, so a host app can manage systems from its own controllers, commands, or tests without reimplementing the persistence pipeline. Its validation SHALL require that `config` and `pricing_profile` decode to objects and that `config.provider_options`, when present, is an object; SHALL require a `base_url` for the `openai-compatible` provider; and SHALL accept a `temperature` in the range `0`–`2`. Capability hydration against a local model server SHALL use the system's API key and SHALL NOT block the save when that server is unreachable.
 
 #### Scenario: Creating a system runs the full pipeline
 
@@ -32,16 +32,38 @@ The package SHALL expose a service that performs every write operation on `AiSys
 
 #### Scenario: Deleting a system deactivates its personas
 
-- **WHEN** a system with linked personas is deleted
-- **THEN** every linked persona is deactivated rather than deleted
-- **AND** the service reports how many were deactivated
+- **WHEN** a system with linked personas and operators is deleted
+- **THEN** every linked persona and operator is deactivated rather than deleted
+- **AND** the system's feature-default claims are removed
+- **AND** the service reports how many personas were deactivated
 - **AND** the system is soft-deleted
+- **AND** all of it occurs in a single transaction
 
 #### Scenario: Duplicating a system
 
 - **WHEN** a host duplicates a system
 - **THEN** a new record is created with the same attributes and a name suffixed with a copy marker
 - **AND** whether feature defaults are copied is an explicit choice, not an accident
+
+#### Scenario: A config that is not an object
+
+- **WHEN** a system is submitted with `config` set to `"true"`, `"[1,2]"`, or with `config.provider_options` set to a string
+- **THEN** validation fails naming the field and nothing is written
+
+#### Scenario: An OpenAI-compatible system without a base URL
+
+- **WHEN** a system with provider `openai-compatible` is submitted without a `base_url`
+- **THEN** validation fails naming `base_url`
+
+#### Scenario: A temperature above one
+
+- **WHEN** a system is submitted with `temperature` `1.5`
+- **THEN** it is accepted and stored
+
+#### Scenario: The local model server is down during a save
+
+- **WHEN** an LM Studio system is updated while its server is unreachable
+- **THEN** the save succeeds and the stored capabilities are left as they were
 
 ### Requirement: A feature has exactly one default system
 
@@ -65,7 +87,7 @@ The package SHALL enforce that a feature key maps to at most one `AiSystem`, and
 
 ### Requirement: Provider models are discoverable with ad-hoc credentials
 
-The package SHALL expose provider model discovery for credentials that do not yet belong to a saved system, so a host can populate a model chooser while creating one.
+The package SHALL expose provider model discovery for credentials that do not yet belong to a saved system, so a host can populate a model chooser while creating one. The API key SHALL be sent in a request header, never in the request URL.
 
 #### Scenario: Listing models before the system exists
 
@@ -76,6 +98,11 @@ The package SHALL expose provider model discovery for credentials that do not ye
 
 - **WHEN** model discovery is requested for a provider requiring an API key and none is supplied
 - **THEN** the service fails with an error naming the requirement, before any network call
+
+#### Scenario: Listing Gemini models
+
+- **WHEN** a host requests models for the Gemini provider
+- **THEN** the request URL carries no `key` parameter and the key is sent as a header
 
 ### Requirement: System prompts are managed through a service
 
@@ -90,7 +117,7 @@ The package SHALL expose a service for reusable system prompt records, including
 
 ### Requirement: Personas are managed through a service
 
-The package SHALL expose a service that creates, updates, deletes, and lists personas, including the usage rollups and tool listings an admin screen displays.
+The package SHALL expose a service that creates, updates, deletes, and lists personas, including the usage rollups and tool listings an admin screen displays. A persona's or operator's system reference SHALL be validated as an existing, non-deleted, active system serving the chat role.
 
 #### Scenario: Listing personas with lifetime usage
 
@@ -108,6 +135,11 @@ The package SHALL expose a service that creates, updates, deletes, and lists per
 - **WHEN** a host asks which tools are available, optionally scoped to a system
 - **THEN** it receives the tool names and descriptions the chat loop would expose
 - **AND** requesting all tools overrides the system's allow-list
+
+#### Scenario: A persona referencing an unusable system
+
+- **WHEN** a persona or operator is saved referencing a soft-deleted, inactive, or audio-role system
+- **THEN** validation fails naming the system field
 
 ### Requirement: Conversations are searchable through a service
 
@@ -130,7 +162,7 @@ The package SHALL expose a service that filters, searches, and inspects stored c
 
 ### Requirement: Memories are managed through a service
 
-The package SHALL expose a service for reviewing, editing, and rebuilding extracted feature memories.
+The package SHALL expose a service for reviewing, editing, and rebuilding extracted feature memories. Creating a memory SHALL require exactly one identity: a user id or a visitor email.
 
 #### Scenario: Listing memories in triage order
 
@@ -141,6 +173,11 @@ The package SHALL expose a service for reviewing, editing, and rebuilding extrac
 
 - **WHEN** a host rebuilds memories for a feature
 - **THEN** the existing extraction service performs the rebuild
+
+#### Scenario: Creating a memory without an identity
+
+- **WHEN** a host creates a memory with neither a user id nor a visitor email
+- **THEN** validation fails naming the identity requirement
 
 ### Requirement: Feature keys are configurable
 
@@ -159,7 +196,7 @@ The package SHALL NOT hardcode host-application feature names in validation.
 
 ### Requirement: MCP servers are managed through a service
 
-The package SHALL expose a service that performs every write operation on remote MCP server records and triggers catalog syncs. It SHALL publish its validation rules so a host can reuse them in its own form requests.
+The package SHALL expose a service that performs every write operation on remote MCP server records and triggers catalog syncs. It SHALL publish its validation rules so a host can reuse them in its own form requests. An update that supplies `auth` as null, an empty string, or a JSON `null` SHALL keep the stored auth configuration, so an edit form that round-trips an untouched field cannot clear a secret.
 
 #### Scenario: Creating a server syncs its catalog
 
@@ -199,6 +236,12 @@ The package SHALL expose a service that performs every write operation on remote
 
 - **WHEN** a host lists servers through the service
 - **THEN** each server includes its last sync time, its last sync error, and its tools with their exposed names and availability, and the auth configuration is not included
+
+#### Scenario: An update that leaves auth blank
+
+- **WHEN** a server is updated with `auth` null, `''`, or the JSON string `null`
+- **THEN** the stored auth configuration is unchanged
+- **AND** the next sync still authenticates
 
 ### Requirement: A serialized system does not carry its secrets
 
@@ -312,3 +355,26 @@ The system manager SHALL list, for a provider and model, the thinking levels tha
 
 - **WHEN** a host asks for the levels of a provider that cannot serve the chat role
 - **THEN** the result lists no levels
+
+### Requirement: Seeded rows do not block later inserts
+
+Rows the package's migrations seed SHALL leave every supported database able to insert the next row, so a host's first create through a management service succeeds on Postgres as it does on MySQL and SQLite.
+
+#### Scenario: Creating a prompt on Postgres after installing
+
+- **WHEN** the package's migrations, including the default prompt seed, have run on Postgres and a host creates a custom system prompt
+- **THEN** the insert succeeds without an identifier collision
+
+### Requirement: A system's API key can be rotated
+
+The system manager SHALL accept an `api_key` on update. A supplied key replaces the stored one; an omitted or blank key keeps it, under the same rule that governs `credentials`.
+
+#### Scenario: Rotating a key
+
+- **WHEN** a system is updated with a new `api_key`
+- **THEN** the stored key is the new value and the next provider call uses it
+
+#### Scenario: An update that omits the key
+
+- **WHEN** a system is updated with no `api_key`, or with it blank
+- **THEN** the stored key is unchanged

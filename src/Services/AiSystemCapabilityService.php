@@ -2,8 +2,11 @@
 
 namespace Jvjvjv\CodeTalker\Services;
 
+use Illuminate\Http\Client\HttpClientException;
+use Illuminate\Support\Facades\Log;
 use Jvjvjv\CodeTalker\Enums\AiProvider;
 use Jvjvjv\CodeTalker\Models\AiSystem;
+use Jvjvjv\CodeTalker\Support\RedactedException;
 
 class AiSystemCapabilityService
 {
@@ -84,19 +87,34 @@ class AiSystemCapabilityService
         ?string $apiKey = null,
     ): ?array {
         return match ($provider) {
-            AiProvider::LmStudio->value => $this->resolveLmStudioCapabilities($model, $baseUrl),
+            AiProvider::LmStudio->value => $this->resolveLmStudioCapabilities($model, $baseUrl, $apiKey),
             default => null,
         };
     }
 
     /**
+     * An unreachable or refusing server yields null, which every caller reads
+     * as "keep what is stored": a save must not fail because the local model
+     * server happens to be down.
+     *
      * @return array{reasoning: bool, vision: bool, tools: bool, max_context_length: int|null}|null
      */
-    private function resolveLmStudioCapabilities(string $model, ?string $baseUrl = null): ?array
+    private function resolveLmStudioCapabilities(string $model, ?string $baseUrl = null, ?string $apiKey = null): ?array
     {
-        $client = new LmStudioServerClient($baseUrl);
+        $client = new LmStudioServerClient($baseUrl, $apiKey);
 
-        $matchingModel = collect($client->listModels())
+        try {
+            $models = $client->listModels();
+        } catch (HttpClientException $e) {
+            Log::warning('Could not resolve LM Studio capabilities; keeping the stored ones.', [
+                'model' => $model,
+                ...RedactedException::context($e),
+            ]);
+
+            return null;
+        }
+
+        $matchingModel = collect($models)
             ->first(static fn (array $listedModel): bool => ($listedModel['id'] ?? null) === $model);
 
         if (!is_array($matchingModel)) {

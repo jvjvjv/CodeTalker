@@ -19,12 +19,18 @@ class AiMemoryManager
     }
 
     /**
+     * A memory belongs to exactly one identity — a user or a visitor, never
+     * both and never neither. An unscoped memory would be injected for no one,
+     * and a dual-scoped one would be read by a visitor typing the user's email.
+     *
      * @return array<string, mixed>
      */
     public static function createRules(): array
     {
         return array_merge([
             'feature' => ['required', 'string', 'max:50'],
+            'user_id' => ['nullable', 'required_without:visitor_email', 'prohibits:visitor_email', 'max:191'],
+            'visitor_email' => ['nullable', 'required_without:user_id', 'prohibits:user_id', 'string', 'email', 'max:255'],
         ], static::sharedRules());
     }
 
@@ -88,6 +94,16 @@ class AiMemoryManager
      */
     public function create(array $data): AiFeatureMemory
     {
+        // A blank identity is no identity. Normalised before validation, not
+        // left to a host's HTTP middleware: a library caller passing
+        // `user_id => ''` would otherwise store a memory that the visitor
+        // scope (`user_id IS NULL`) can never read.
+        foreach (['user_id', 'visitor_email'] as $field) {
+            if (array_key_exists($field, $data) && is_string($data[$field]) && trim($data[$field]) === '') {
+                $data[$field] = null;
+            }
+        }
+
         return AiFeatureMemory::create(
             Validator::make($data, static::createRules())->validate()
         );

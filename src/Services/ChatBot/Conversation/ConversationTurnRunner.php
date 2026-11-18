@@ -117,6 +117,11 @@ class ConversationTurnRunner
             $events = [];
             $toolCalls = [];
 
+            // What this attempt alone said. $blocks holds the whole turn, which
+            // is what gets persisted, but the history already carries earlier
+            // attempts' text — feeding $blocks back would repeat it.
+            $attemptText = '';
+
             $this->rawExchangeContext->push(RawExchangeFrame::forSystem(
                 $system,
                 $this->providerConfigurator,
@@ -250,6 +255,7 @@ class ConversationTurnRunner
                     foreach ($translator->translate($event) as $browserEvent) {
                         if ($browserEvent['type'] === 'content_block_delta') {
                             $blocks->append('text', $browserEvent['delta']['text']);
+                            $attemptText .= $browserEvent['delta']['text'];
                         } elseif ($browserEvent['type'] === 'reasoning_block_delta') {
                             $blocks->append('reasoning', $browserEvent['delta']['reasoning']);
                         }
@@ -289,9 +295,16 @@ class ConversationTurnRunner
                 break;
             }
 
-            // The model ran out of room mid-answer: feed back what it has said
-            // so far and ask it to keep going.
-            $agent->append(new UserMessage($prompt), new AssistantMessage($blocks->text()));
+            // An attempt that spent its budget without any text (reasoning
+            // only) has nothing to feed back, and providers reject an empty
+            // assistant turn. Re-send the same prompt instead.
+            if ($attemptText === '') {
+                continue;
+            }
+
+            // The model ran out of room mid-answer: feed back what this attempt
+            // said and ask it to keep going.
+            $agent->append(new UserMessage($prompt), new AssistantMessage($attemptText));
             $prompt = 'Continue.';
         }
 

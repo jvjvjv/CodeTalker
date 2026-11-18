@@ -106,12 +106,22 @@ export function streamChatTurn(
     options: ChatTurnOptions = {},
 ): ChatTurn {
     const controller = new AbortController();
+    const signal = options.signal;
+    const forwardAbort = (): void => controller.abort();
 
-    if (options.signal) {
-        options.signal.addEventListener('abort', () => controller.abort(), { once: true });
+    // A signal that is already aborted never fires `abort` again, so it has to
+    // be honoured up front or the request would go out regardless.
+    if (signal?.aborted) {
+        controller.abort();
+    } else {
+        signal?.addEventListener('abort', forwardAbort, { once: true });
     }
 
-    const done = run(messageUrl, payload, callbacks, options, controller);
+    // The listener would otherwise keep this turn's controller reachable for
+    // as long as a long-lived caller signal lives.
+    const done = run(messageUrl, payload, callbacks, options, controller).finally(() => {
+        signal?.removeEventListener('abort', forwardAbort);
+    });
 
     return {
         abort: () => controller.abort(),

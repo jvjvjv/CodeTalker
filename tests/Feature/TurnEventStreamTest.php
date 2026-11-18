@@ -4,7 +4,6 @@ namespace Jvjvjv\CodeTalker\Tests\Feature;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Enums\AiTurnRunStatus;
 use Jvjvjv\CodeTalker\Models\AiConversation;
 use Jvjvjv\CodeTalker\Models\AiSystem;
@@ -27,12 +26,6 @@ class TurnEventStreamTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
 
         config()->set('code-talker.turns.poll_interval_ms', 1);
     }

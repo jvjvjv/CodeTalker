@@ -15,15 +15,20 @@ class TurnSequence
 {
     public function nextFor(AiConversation $conversation): int
     {
+        // `turn_number` is a string column, so the database's MAX() compares
+        // labels lexically and puts "9" after "10". Only whole-numbered labels
+        // are read, and the maximum is taken in PHP so no driver-specific CAST
+        // is needed.
         $maxTurn = AiLlmMessage::query()
             ->where('ai_conversation_id', $conversation->id)
-            ->max('turn_number');
+            ->where('turn_number', 'not like', '%.%')
+            ->distinct()
+            ->pluck('turn_number')
+            ->filter(static fn (mixed $label): bool => is_numeric($label))
+            ->map(static fn (mixed $label): int => (int) $label)
+            ->max();
 
-        if ($maxTurn === null || !is_numeric($maxTurn)) {
-            return 1;
-        }
-
-        return (int) $maxTurn + 1;
+        return $maxTurn === null ? 1 : $maxTurn + 1;
     }
 
     /**

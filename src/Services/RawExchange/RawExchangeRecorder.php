@@ -175,7 +175,12 @@ class RawExchangeRecorder
                 'ai_llm_message_id' => $frame->aiLlmMessageId,
             ]);
         } catch (\Throwable $e) {
-            Log::warning('Failed to record provider exchange', ['exception' => $e->getMessage()]);
+            // Class and code only: a QueryException's message interpolates the
+            // bindings, which here are the full request and response bodies.
+            Log::warning('Failed to record provider exchange', [
+                'exception' => $e::class,
+                'code' => $e->getCode(),
+            ]);
         }
     }
 }

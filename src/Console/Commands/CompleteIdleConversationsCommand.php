@@ -25,9 +25,11 @@ class CompleteIdleConversationsCommand extends Command
 
     public function handle(): int
     {
-        $minutes = $this->option('minutes') !== null
-            ? max((int) $this->option('minutes'), 0)
-            : (int) config('code-talker.conversations.idle_timeout_minutes', 30);
+        // Clamped either way: a negative window puts the cutoff in the future,
+        // which would count every conversation as idle and complete live ones.
+        $minutes = max(0, $this->option('minutes') !== null
+            ? (int) $this->option('minutes')
+            : (int) config('code-talker.conversations.idle_timeout_minutes', 30));
 
         $cutoff = now()->subMinutes($minutes);
 
@@ -52,7 +54,9 @@ class CompleteIdleConversationsCommand extends Command
 
         // Updated one at a time so the model observer fires per conversation;
         // a mass update() would bypass it and skip memory extraction entirely.
-        $query->each(function (AiConversation $conversation) use (&$completed): void {
+        // By id rather than by offset: each update drops the row out of the
+        // query, so offset paging would skip every other chunk.
+        $query->eachById(function (AiConversation $conversation) use (&$completed): void {
             $conversation->update(['status' => AiConversationStatus::Completed]);
             $completed++;
         });

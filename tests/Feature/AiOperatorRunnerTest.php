@@ -2,7 +2,6 @@
 
 namespace Jvjvjv\CodeTalker\Tests\Feature;
 
-use Illuminate\Support\Facades\Schema;
 use Jvjvjv\CodeTalker\Enums\AiConversationStatus;
 use Jvjvjv\CodeTalker\Models\AiLlmMessage;
 use Jvjvjv\CodeTalker\Models\AiInteractionLog;
@@ -31,17 +30,6 @@ class AiOperatorRunnerTest extends TestCase
     protected function defineDatabaseMigrations(): void
     {
         $this->loadLaravelMigrations();
-    }
-
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        if (!Schema::hasColumn('ai_conversations', 'uuid')) {
-            Schema::table('ai_conversations', function ($table): void {
-                $table->string('uuid')->nullable();
-            });
-        }
     }
 
     private function makeOperator(array $overrides = []): AiOperator

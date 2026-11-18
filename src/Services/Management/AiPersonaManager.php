@@ -64,9 +64,18 @@ class AiPersonaManager
             ],
             'access_path' => ['required', Rule::in([AiPersona::ACCESS_PATH_CHAT, AiPersona::ACCESS_PATH_ROOT])],
             'description' => ['nullable', 'string'],
-            'ai_system_id' => ['required', 'integer', 'exists:ai_systems,id'],
+            // A deleted, inactive, or voice-role system saves fine and fails
+            // at the first turn, so it is refused here instead.
+            'ai_system_id' => [
+                'required',
+                'integer',
+                Rule::exists('ai_systems', 'id')
+                    ->whereNull('deleted_at')
+                    ->where('is_active', true)
+                    ->where('role', AiSystemRole::Chat->value),
+            ],
             'context_length' => ['nullable', 'integer', 'min:1', 'max:200000'],
-            'temperature' => ['nullable', 'numeric', 'min:0', 'max:1'],
+            'temperature' => ['nullable', 'numeric', 'min:0', 'max:2'],
             'prompt_template' => ['required', 'string'],
             'is_active' => ['boolean'],
             'require_visitor_identity' => ['boolean'],

@@ -249,8 +249,11 @@ class CodeTalkerServiceProvider extends ServiceProvider
         }
 
         if (config('code-talker.mcp.web.enabled', true)) {
+            // Authenticated by default even when the host's published config
+            // predates the key: the caller is what scopes the tools' user data.
+            // An explicit [] is the host opting out, and is honoured.
             Mcp::web((string) config('code-talker.mcp.web.path', 'mcp/code-talker'), CodeTalkerServer::class)
-                ->middleware((array) config('code-talker.mcp.web.middleware', []));
+                ->middleware((array) (config('code-talker.mcp.web.middleware') ?? ['auth:sanctum']));
         }
 
         if (config('code-talker.mcp.local.enabled', false)) {

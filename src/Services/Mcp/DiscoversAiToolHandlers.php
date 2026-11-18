@@ -4,6 +4,8 @@ namespace Jvjvjv\CodeTalker\Services\Mcp;
 
 use Jvjvjv\CodeTalker\Contracts\Mcp\AiToolHandlerContract;
 use Illuminate\Support\Facades\File;
+use Jvjvjv\CodeTalker\Support\ToolContext;
+use ReflectionNamedType;
 use Laravel\Mcp\Server\Tool;
 use ReflectionClass;
 use SplFileInfo;
@@ -65,7 +67,7 @@ trait DiscoversAiToolHandlers
                 continue;
             }
 
-            $handler = app()->makeWith($className, $parameterOverrides);
+            $handler = app()->makeWith($className, $this->withToolContextOverrides($reflection, $parameterOverrides));
             $handlerName = $handler->name();
 
             if (!isset($handlers[$handlerName])) {
@@ -74,6 +76,43 @@ trait DiscoversAiToolHandlers
         }
 
         return $handlers;
+    }
+
+    /**
+     * Give the run's ToolContext to every constructor parameter typed
+     * ToolContext, whatever it is named.
+     *
+     * makeWith() overrides match by parameter name, so `'context'` alone
+     * reaches only a parameter called `$context`. Any other name would fall
+     * through to the container's default binding — the external MCP
+     * transport's context, which carries no conversation — and the tool would
+     * run as nobody, or, worse, as the MCP caller. Overriding by name keeps
+     * the fix scoped to this one build; a contextual container binding would
+     * outlive it and leak this conversation into the next resolution.
+     *
+     * @param ReflectionClass<object> $reflection
+     * @param array<string, mixed> $parameterOverrides
+     * @return array<string, mixed>
+     */
+    private function withToolContextOverrides(ReflectionClass $reflection, array $parameterOverrides): array
+    {
+        $context = $parameterOverrides['context'] ?? null;
+
+        if (!$context instanceof ToolContext) {
+            return $parameterOverrides;
+        }
+
+        foreach ($reflection->getConstructor()?->getParameters() ?? [] as $parameter) {
+            $type = $parameter->getType();
+
+            if ($type instanceof ReflectionNamedType
+                && $type->getName() === ToolContext::class
+                && !array_key_exists($parameter->getName(), $parameterOverrides)) {
+                $parameterOverrides[$parameter->getName()] = $context;
+            }
+        }
+
+        return $parameterOverrides;
     }
 
     /**
